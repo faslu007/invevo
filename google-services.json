@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "684383874940",
+    "project_id": "invevo-6e9d6",
+    "storage_bucket": "invevo-6e9d6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:684383874940:android:2f282ac5319b5204893ef9",
+        "android_client_info": {
+          "package_name": "com.invevo.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "684383874940-2na6fptlfpvtsgb1sro9bfmso02p4fnv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.invevo.app",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "684383874940-6snj6noe506j401g98g9o9bkmpglean4.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCKerFiW0QPgkRAxj4h5BpDl4gbRt830UA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "684383874940-6snj6noe506j401g98g9o9bkmpglean4.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "684383874940-hsn1jt13hapsmt7n00roj3a7psn3mq5u.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.invevo.app"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
