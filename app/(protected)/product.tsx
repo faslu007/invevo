@@ -2,7 +2,7 @@ import { Feather } from '@expo/vector-icons';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
@@ -49,10 +49,19 @@ interface FilterState {
     activeFilter: 'all' | 'lowStock' | 'expiring' | 'expired' | 'inactive';
 }
 
+interface PaginationState {
+    currentPage: number;
+    pageSize: number;
+    hasMoreData: boolean;
+    isLoadingMore: boolean;
+}
+
 export default function ProductScreen() {
     const { showSnackbar } = useSnackbar();
     const [products, setProducts] = useState<Product[]>([]);
+    const [allProducts, setAllProducts] = useState<Product[]>([]); // Store all products for filtering
     const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
+    const [paginatedProducts, setPaginatedProducts] = useState<Product[]>([]);
     const [searchSuggestions, setSearchSuggestions] = useState<Product[]>([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -63,6 +72,17 @@ export default function ProductScreen() {
         searchQuery: '',
         activeFilter: 'all',
     });
+    const [pagination, setPagination] = useState<PaginationState>({
+        currentPage: 1,
+        pageSize: 20, // Load 20 items at a time
+        hasMoreData: true,
+        isLoadingMore: false,
+    });
+
+    // Refs for scroll position preservation
+    const flatListRef = useRef<FlatList>(null);
+    const scrollPosition = useRef(0);
+    const shouldPreserveScroll = useRef(false);
 
     const fetchMerchantId = useCallback(async () => {
         try {
@@ -82,9 +102,16 @@ export default function ProductScreen() {
         }
     }, [showSnackbar]);
 
-    const fetchProducts = useCallback(async () => {
+    const fetchProducts = useCallback(async (loadMore = false) => {
         if (!merchantId) return;
-        setLoading(true);
+
+        if (!loadMore) {
+            setLoading(true);
+            setPagination(prev => ({ ...prev, currentPage: 1, hasMoreData: true }));
+        } else {
+            setPagination(prev => ({ ...prev, isLoadingMore: true }));
+        }
+
         try {
             const productsSnapshot = await firestore()
                 .collection('products')
@@ -103,12 +130,20 @@ export default function ProductScreen() {
             });
 
             productsList.sort((a, b) => (b.updatedAt?.getTime() || 0) - (a.updatedAt?.getTime() || 0));
-            setProducts(productsList);
+
+            if (!loadMore) {
+                setProducts(productsList);
+                setAllProducts(productsList);
+            }
         } catch (error) {
             console.error('Error fetching products:', error);
             showSnackbar('Failed to load products. Please try again.', 'error');
         } finally {
-            setLoading(false);
+            if (!loadMore) {
+                setLoading(false);
+            } else {
+                setPagination(prev => ({ ...prev, isLoadingMore: false }));
+            }
         }
     }, [merchantId, showSnackbar]);
 
@@ -131,11 +166,16 @@ export default function ProductScreen() {
         }
     }, [products]);
 
+    const navigateToEdit = useCallback((productId: string) => {
+        shouldPreserveScroll.current = true;
+        router.push({ pathname: '/(protected)/edit-product', params: { id: productId } });
+    }, []);
+
     const selectSuggestion = useCallback((product: Product) => {
         setShowSuggestions(false);
         setSearchSuggestions([]);
-        router.push({ pathname: '/(protected)/edit-product', params: { id: product.id } });
-    }, []);
+        navigateToEdit(product.id);
+    }, [navigateToEdit]);
 
     const applyFilters = useCallback(() => {
         let filtered = [...products];
@@ -181,25 +221,83 @@ export default function ProductScreen() {
         }
 
         setFilteredProducts(filtered);
-    }, [products, filters]);
+
+        // Reset pagination when filters change
+        setPagination(prev => ({ ...prev, currentPage: 1, hasMoreData: true }));
+
+        // Apply pagination to filtered results
+        const startIndex = 0;
+        const endIndex = pagination.pageSize;
+        const paginatedData = filtered.slice(startIndex, endIndex);
+        setPaginatedProducts(paginatedData);
+
+        // Update hasMoreData based on whether there are more items
+        setPagination(prev => ({
+            ...prev,
+            hasMoreData: filtered.length > pagination.pageSize
+        }));
+    }, [products, filters, pagination.pageSize]);
 
     useEffect(() => {
         fetchMerchantId();
     }, [fetchMerchantId]);
 
     useEffect(() => {
-        if (merchantId) fetchProducts();
+        if (merchantId) fetchProducts(false);
     }, [merchantId, fetchProducts]);
+
+    const loadMoreProducts = useCallback(() => {
+        if (!pagination.hasMoreData || pagination.isLoadingMore) return;
+
+        const nextPage = pagination.currentPage + 1;
+        const startIndex = (nextPage - 1) * pagination.pageSize;
+        const endIndex = startIndex + pagination.pageSize;
+
+        const newProducts = filteredProducts.slice(startIndex, endIndex);
+
+        if (newProducts.length === 0) {
+            setPagination(prev => ({ ...prev, hasMoreData: false }));
+            return;
+        }
+
+        setPaginatedProducts(prev => [...prev, ...newProducts]);
+        setPagination(prev => ({
+            ...prev,
+            currentPage: nextPage,
+            hasMoreData: endIndex < filteredProducts.length
+        }));
+    }, [filteredProducts, pagination]);
+
+    const handleScroll = useCallback((event: any) => {
+        scrollPosition.current = event.nativeEvent.contentOffset.y;
+    }, []);
+
+    const preserveScrollPosition = useCallback(() => {
+        if (shouldPreserveScroll.current && flatListRef.current && scrollPosition.current > 0) {
+            setTimeout(() => {
+                flatListRef.current?.scrollToOffset({
+                    offset: scrollPosition.current,
+                    animated: false
+                });
+                shouldPreserveScroll.current = false;
+            }, 100);
+        }
+    }, []);
 
     useFocusEffect(
         useCallback(() => {
-            if (merchantId) fetchProducts();
-        }, [merchantId, fetchProducts])
+            if (merchantId) {
+                fetchProducts(false);
+                // Preserve scroll position when returning from edit screen
+                preserveScrollPosition();
+            }
+        }, [merchantId, fetchProducts, preserveScrollPosition])
     );
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        if (merchantId) await fetchProducts();
+        scrollPosition.current = 0; // Reset scroll position on refresh
+        if (merchantId) await fetchProducts(false);
         setRefreshing(false);
     }, [merchantId, fetchProducts]);
 
@@ -238,84 +336,6 @@ export default function ProductScreen() {
 
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
     const [isModalImageLoading, setIsModalImageLoading] = useState(false);
-
-    const renderProduct = ({ item }: { item: Product }) => {
-        const stockStatus = getStockStatus(item.stockQuantity, item.minStock);
-        const expiryStatus = getExpiryStatus(item.expiryDate);
-
-        return (
-            <View style={styles.productCard}>
-                <View style={styles.productHeader}>
-                    {/* Small Product Image to the left */}
-                    <TouchableOpacity
-                        onPress={() => item.imageUrl ? setSelectedImage(item.imageUrl) : null}
-                        style={styles.thumbnailContainer}
-                    >
-                        <View style={styles.placeholderThumbnail}>
-                            <Feather name="image" size={20} color="#bbb" />
-                        </View>
-                        {item.imageUrl && (
-                            <Image
-                                source={{ uri: item.imageUrl }}
-                                style={styles.thumbnailImage}
-                                resizeMode="cover"
-                                fadeDuration={300}
-                            />
-                        )}
-                    </TouchableOpacity>
-
-                    <View style={styles.productTitleContainer}>
-                        <Text style={styles.productName} numberOfLines={2}>{item.productName}</Text>
-                        <Text style={styles.productSku}>SKU: {item.sku}</Text>
-                    </View>
-                    <TouchableOpacity
-                        style={styles.editIcon}
-                        onPress={() => router.push({ pathname: '/(protected)/edit-product', params: { id: item.id } })}
-                        activeOpacity={0.7}
-                    >
-                        <Feather name="edit" size={20} color="#6a7a90" />
-                    </TouchableOpacity>
-                </View>
-
-                <View style={styles.productDetails}>
-                    <View style={styles.detailRow}>
-                        <Text style={styles.detailLabel}>Category</Text>
-                        <Text style={styles.detailValue}>{item.category}</Text>
-                    </View>
-                    <View style={styles.detailRow}>
-                        <Text style={styles.detailLabel}>Brand</Text>
-                        <Text style={styles.detailValue}>{item.brand}</Text>
-                    </View>
-                    <View style={styles.detailRow}>
-                        <Text style={styles.detailLabel}>Selling Price</Text>
-                        <Text style={styles.priceValue}>{formatPrice(item.sellingPrice)}</Text>
-                    </View>
-                    <View style={styles.detailRow}>
-                        <Text style={styles.detailLabel}>Stock</Text>
-                        <View style={styles.statusContainer}>
-                            <Text style={styles.detailValue}>{item.stockQuantity} {item.measurementUnit}</Text>
-                            <View style={[styles.statusBadge, { backgroundColor: stockStatus.color }]}>
-                                <Text style={styles.statusText}>{stockStatus.label}</Text>
-                            </View>
-                        </View>
-                    </View>
-                    {item.expiryDate && (
-                        <View style={styles.detailRow}>
-                            <Text style={styles.detailLabel}>Expiry</Text>
-                            <View style={styles.statusContainer}>
-                                <Text style={styles.detailValue}>{formatDate(item.expiryDate)}</Text>
-                                {expiryStatus && (
-                                    <View style={[styles.statusBadge, { backgroundColor: expiryStatus.color }]}>
-                                        <Text style={styles.statusText}>{expiryStatus.label}</Text>
-                                    </View>
-                                )}
-                            </View>
-                        </View>
-                    )}
-                </View>
-            </View>
-        );
-    };
 
     const filterButtons = [
         { key: 'all', label: 'All', icon: '📦' },
@@ -421,12 +441,104 @@ export default function ProductScreen() {
             {/* Card View */}
             {viewMode === 'card' && (
                 <FlatList
-                    data={filteredProducts}
+                    ref={flatListRef}
+                    data={paginatedProducts}
                     keyExtractor={item => item.id}
-                    renderItem={renderProduct}
+                    renderItem={({ item }) => {
+                        const stockStatus = getStockStatus(item.stockQuantity, item.minStock);
+                        const expiryStatus = getExpiryStatus(item.expiryDate);
+
+                        return (
+                            <View style={styles.productCard}>
+                                <View style={styles.productHeader}>
+                                    {/* Small Product Image to the left */}
+                                    <TouchableOpacity
+                                        onPress={() => item.imageUrl ? setSelectedImage(item.imageUrl) : null}
+                                        style={styles.thumbnailContainer}
+                                    >
+                                        <View style={styles.placeholderThumbnail}>
+                                            <Feather name="image" size={16} color="#bbb" />
+                                        </View>
+                                        {item.imageUrl && (
+                                            <Image
+                                                source={{ uri: item.imageUrl }}
+                                                style={styles.thumbnailImage}
+                                                resizeMode="cover"
+                                                fadeDuration={300}
+                                            />
+                                        )}
+                                    </TouchableOpacity>
+
+                                    <View style={styles.productTitleContainer}>
+                                        <Text style={styles.productName} numberOfLines={2}>{item.productName}</Text>
+                                        <Text style={styles.productSku}>SKU: {item.sku}</Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={styles.editIcon}
+                                        onPress={() => navigateToEdit(item.id)}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Feather name="edit" size={20} color="#6a7a90" />
+                                    </TouchableOpacity>
+                                </View>
+
+                                <View style={styles.productDetails}>
+                                    <View style={styles.detailRow}>
+                                        <Text style={styles.detailLabel}>Category</Text>
+                                        <Text style={styles.detailValue}>{item.category}</Text>
+                                    </View>
+                                    <View style={styles.detailRow}>
+                                        <Text style={styles.detailLabel}>Brand</Text>
+                                        <Text style={styles.detailValue}>{item.brand}</Text>
+                                    </View>
+                                    <View style={styles.detailRow}>
+                                        <Text style={styles.detailLabel}>Selling Price</Text>
+                                        <Text style={styles.priceValue}>{formatPrice(item.sellingPrice)}</Text>
+                                    </View>
+                                    <View style={styles.detailRow}>
+                                        <Text style={styles.detailLabel}>Stock</Text>
+                                        <View style={styles.statusContainer}>
+                                            <Text style={styles.detailValue}>{item.stockQuantity} {item.measurementUnit}</Text>
+                                            <View style={[styles.statusBadge, { backgroundColor: stockStatus.color }]}>
+                                                <Text style={styles.statusText}>{stockStatus.label}</Text>
+                                            </View>
+                                        </View>
+                                    </View>
+                                    {item.expiryDate && (
+                                        <View style={styles.detailRow}>
+                                            <Text style={styles.detailLabel}>Expiry</Text>
+                                            <View style={styles.statusContainer}>
+                                                <Text style={styles.detailValue}>{formatDate(item.expiryDate)}</Text>
+                                                {expiryStatus && (
+                                                    <View style={[styles.statusBadge, { backgroundColor: expiryStatus.color }]}>
+                                                        <Text style={styles.statusText}>{expiryStatus.label}</Text>
+                                                    </View>
+                                                )}
+                                            </View>
+                                        </View>
+                                    )}
+                                </View>
+                            </View>
+                        );
+                    }}
                     contentContainerStyle={styles.listContainer}
                     showsVerticalScrollIndicator={false}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1976d2']} tintColor="#1976d2" />}
+                    onEndReached={loadMoreProducts}
+                    onEndReachedThreshold={0.3}
+                    onScroll={handleScroll}
+                    scrollEventThrottle={16}
+                    ListFooterComponent={() => {
+                        if (pagination.isLoadingMore) {
+                            return (
+                                <View style={styles.loadingMore}>
+                                    <ActivityIndicator size="small" color="#1976d2" />
+                                    <Text style={styles.loadingMoreText}>Loading more products...</Text>
+                                </View>
+                            );
+                        }
+                        return null;
+                    }}
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
                             <Feather name="package" size={64} color="#ced4da" />
@@ -449,7 +561,7 @@ export default function ProductScreen() {
                     {/* Table Header */}
                     <View style={styles.tableHeader}>
                         <View style={[styles.tableCell, styles.imageCell]}>
-                            <Text style={styles.tableHeaderText}>Image</Text>
+                            <Text style={styles.tableHeaderText}> 📷</Text>
                         </View>
                         <View style={[styles.tableCell, styles.nameCell]}>
                             <Text style={styles.tableHeaderText}>Product</Text>
@@ -461,15 +573,20 @@ export default function ProductScreen() {
                             <Text style={styles.tableHeaderText}>Stock</Text>
                         </View>
                         <View style={[styles.tableCell, styles.actionCell]}>
-                            <Text style={styles.tableHeaderText}>Action</Text>
+                            <Text style={styles.tableHeaderText}>✏️</Text>
                         </View>
                     </View>
 
                     <FlatList
-                        data={filteredProducts}
+                        ref={flatListRef}
+                        data={paginatedProducts}
                         keyExtractor={item => item.id}
                         contentContainerStyle={styles.tableListContainer}
                         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1976d2']} tintColor="#1976d2" />}
+                        onEndReached={loadMoreProducts}
+                        onEndReachedThreshold={0.3}
+                        onScroll={handleScroll}
+                        scrollEventThrottle={16}
                         renderItem={({ item }) => {
                             const stockStatus = getStockStatus(item.stockQuantity, item.minStock);
 
@@ -487,7 +604,7 @@ export default function ProductScreen() {
                                             />
                                         ) : (
                                             <View style={styles.tableImagePlaceholder}>
-                                                <Feather name="image" size={14} color="#bbb" />
+                                                    <Feather name="image" size={12} color="#bbb" />
                                             </View>
                                         )}
                                     </TouchableOpacity>
@@ -511,13 +628,24 @@ export default function ProductScreen() {
                                     <View style={[styles.tableCell, styles.actionCell]}>
                                         <TouchableOpacity
                                             style={styles.tableActionButton}
-                                            onPress={() => router.push({ pathname: '/(protected)/edit-product', params: { id: item.id } })}
+                                            onPress={() => navigateToEdit(item.id)}
                                         >
-                                            <Feather name="edit" size={16} color="#1976d2" />
+                                            <Feather name="edit" size={14} color="#1976d2" />
                                         </TouchableOpacity>
                                     </View>
                                 </View>
                             );
+                        }}
+                        ListFooterComponent={() => {
+                            if (pagination.isLoadingMore) {
+                                return (
+                                    <View style={styles.loadingMore}>
+                                        <ActivityIndicator size="small" color="#1976d2" />
+                                        <Text style={styles.loadingMoreText}>Loading more products...</Text>
+                                    </View>
+                                );
+                            }
+                            return null;
                         }}
                         ListEmptyComponent={
                             <View style={styles.emptyContainer}>
@@ -541,7 +669,7 @@ export default function ProductScreen() {
                 onPress={() => router.push('/(protected)/create-product')}
                 activeOpacity={0.8}
             >
-                <Feather name="plus" size={28} color="#fff" />
+                <Feather name="plus" size={24} color="#fff" />
             </TouchableOpacity>
 
             {/* Image Modal */}
@@ -594,25 +722,25 @@ const styles = StyleSheet.create({
         fontFamily: 'System', // Specify font for consistency
     },
     header: {
-        padding: 24,
-        paddingBottom: 16,
+        padding: 16,
+        paddingBottom: 12,
         backgroundColor: '#ffffff',
         borderBottomWidth: 1,
         borderBottomColor: '#e9ecef',
     },
     title: {
-        fontSize: 26,
-        fontWeight: '700', // Bold but not overly so
+        fontSize: 22,
+        fontWeight: '700',
         color: '#212529',
     },
     subtitle: {
         color: '#6c757d',
-        fontSize: 15,
-        marginTop: 4,
+        fontSize: 13,
+        marginTop: 2,
     },
     searchContainer: {
-        paddingHorizontal: 24,
-        paddingVertical: 16,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
         backgroundColor: '#ffffff',
         borderBottomWidth: 1,
         borderBottomColor: '#e9ecef',
@@ -620,17 +748,18 @@ const styles = StyleSheet.create({
     searchInputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#f1f3f5', // Softer search bar background
-        borderRadius: 12,
-        paddingHorizontal: 12,
+        backgroundColor: '#f1f3f5',
+        borderRadius: 8,
+        paddingHorizontal: 10,
+        height: 40,
     },
     searchIcon: {
         marginRight: 8,
     },
     searchInput: {
         flex: 1,
-        paddingVertical: 14,
-        fontSize: 16,
+        paddingVertical: 8,
+        fontSize: 14,
         color: '#212529',
     },
     clearSearchIcon: {
@@ -669,54 +798,44 @@ const styles = StyleSheet.create({
     },
     filtersSection: {
         backgroundColor: '#ffffff',
-        paddingBottom: 12,
+        paddingBottom: 8,
         borderBottomWidth: 1,
         borderBottomColor: '#e9ecef',
-        marginBottom: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 3,
-        elevation: 2,
+        marginBottom: 8,
     },
     filtersSectionHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 24,
-        paddingTop: 14,
-        paddingBottom: 12,
+        paddingHorizontal: 16,
+        paddingTop: 10,
+        paddingBottom: 8,
     },
     filtersSectionTitle: {
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: '600',
         color: '#333',
-        letterSpacing: 0.3,
+        letterSpacing: 0.2,
     },
     filtersContent: {
-        paddingTop: 6,
-        paddingBottom: 8,
-        paddingHorizontal: 24,
-        gap: 10, // Slightly tighter spacing between chips
+        paddingTop: 4,
+        paddingBottom: 6,
+        paddingHorizontal: 16,
+        gap: 8,
     },
     viewToggleContainer: {
         flexDirection: 'row',
         backgroundColor: '#f1f3f5',
-        borderRadius: 8,
+        borderRadius: 6,
         padding: 2,
-        shadowColor: '#000',
-        shadowOpacity: 0.06,
-        shadowOffset: { width: 0, height: 1 },
-        shadowRadius: 3,
-        elevation: 2,
         borderWidth: 1,
         borderColor: '#e9ecef',
     },
     viewToggleButton: {
-        paddingVertical: 6,
-        paddingHorizontal: 12,
-        borderRadius: 6,
-        minWidth: 36,
+        paddingVertical: 4,
+        paddingHorizontal: 8,
+        borderRadius: 4,
+        minWidth: 28,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -730,20 +849,15 @@ const styles = StyleSheet.create({
     },
     filterChip: {
         backgroundColor: '#fff',
-        borderRadius: 10, // More elegant radius
-        paddingVertical: 8,
-        paddingHorizontal: 16,
+        borderRadius: 8,
+        paddingVertical: 6,
+        paddingHorizontal: 12,
         borderWidth: 1,
         borderColor: '#e9ecef',
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        shadowColor: '#000',
-        shadowOpacity: 0.04,
-        shadowRadius: 3,
-        shadowOffset: { width: 0, height: 1 },
-        elevation: 2,
-        minHeight: 36,
+        minHeight: 28,
     },
     filterChipActive: {
         backgroundColor: '#1976d2',
@@ -753,66 +867,66 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.2,
     },
     filterChipIcon: {
-        fontSize: 14,
-        marginRight: 6,
+        fontSize: 12,
+        marginRight: 4,
     },
     filterChipText: {
         color: '#495057',
         fontWeight: '500',
-        fontSize: 13,
-        letterSpacing: 0.2,
+        fontSize: 12,
+        letterSpacing: 0.1,
     },
     filterChipTextActive: {
         color: '#fff',
         fontWeight: '600',
     },
     listContainer: {
-        paddingHorizontal: 16,
-        paddingTop: 16,
-        paddingBottom: 100, // Ensure space for FAB
+        paddingHorizontal: 12,
+        paddingTop: 8,
+        paddingBottom: 80,
     },
     productCard: {
         backgroundColor: '#fff',
-        borderRadius: 16,
-        padding: 20,
-        marginBottom: 16,
+        borderRadius: 12,
+        padding: 14,
+        marginBottom: 10,
         borderWidth: 1,
         borderColor: '#e9ecef',
         shadowColor: '#495057',
-        shadowOpacity: 0.1,
-        shadowRadius: 10,
-        shadowOffset: { width: 0, height: 4 },
-        elevation: 3,
+        shadowOpacity: 0.08,
+        shadowRadius: 6,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 2,
     },
     productHeader: {
         flexDirection: 'row',
         justifyContent: 'flex-start',
         alignItems: 'center',
-        marginBottom: 16,
+        marginBottom: 10,
     },
     productTitleContainer: {
         flex: 1,
         marginRight: 8,
     },
     productName: {
-        fontSize: 18,
-        fontWeight: '700',
+        fontSize: 16,
+        fontWeight: '600',
         color: '#212529',
-        lineHeight: 24,
+        lineHeight: 20,
     },
     productSku: {
-        fontSize: 13,
+        fontSize: 11,
         color: '#6c757d',
-        marginTop: 4,
+        marginTop: 2,
     },
     editIcon: {
         padding: 4, // Tappable area
     },
     productDetails: {
-        gap: 12,
+        gap: 8,
         borderTopWidth: 1,
         borderTopColor: '#f1f3f5',
-        paddingTop: 16,
+        paddingTop: 10,
     },
     detailRow: {
         flexDirection: 'row',
@@ -820,35 +934,35 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     detailLabel: {
-        fontSize: 14,
+        fontSize: 12,
         color: '#6c757d',
         fontWeight: '500',
     },
     detailValue: {
-        fontSize: 14,
+        fontSize: 12,
         color: '#212529',
         fontWeight: '600',
     },
     priceValue: {
-        fontSize: 15,
+        fontSize: 13,
         color: '#1976d2',
         fontWeight: '700',
     },
     statusContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: 6,
     },
     statusBadge: {
-        borderRadius: 12,
-        paddingVertical: 4,
-        paddingHorizontal: 10,
+        borderRadius: 8,
+        paddingVertical: 2,
+        paddingHorizontal: 6,
     },
     statusText: {
         color: '#fff',
-        fontSize: 11,
+        fontSize: 9,
         fontWeight: '700',
-        letterSpacing: 0.3,
+        letterSpacing: 0.2,
     },
     emptyContainer: {
         alignItems: 'center',
@@ -870,14 +984,28 @@ const styles = StyleSheet.create({
         marginTop: 8,
     },
 
+    // Loading More Styles
+    loadingMore: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingVertical: 20,
+        gap: 8,
+    },
+    loadingMoreText: {
+        color: '#6c757d',
+        fontSize: 14,
+        fontWeight: '500',
+    },
+
     // Thumbnail Image Styles
     thumbnailContainer: {
-        width: 50,
-        height: 50,
-        borderRadius: 8,
+        width: 40,
+        height: 40,
+        borderRadius: 6,
         overflow: 'hidden',
         position: 'relative',
-        marginRight: 12,
+        marginRight: 10,
         backgroundColor: '#f5f5f5',
     },
     thumbnailImage: {
@@ -935,41 +1063,40 @@ const styles = StyleSheet.create({
     tableContainer: {
         flex: 1,
         backgroundColor: '#fff',
-        borderRadius: 12,
-        margin: 16,
-        marginTop: 8,
+        borderRadius: 8,
+        margin: 12,
+        marginTop: 6,
         overflow: 'hidden',
         borderWidth: 1,
         borderColor: '#e9ecef',
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 4,
-        elevation: 2,
-        maxHeight: '80%', // Ensure table doesn't take up entire screen
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.04,
+        shadowRadius: 2,
+        elevation: 1,
     },
     tableHeader: {
         flexDirection: 'row',
         backgroundColor: '#f8f9fa',
         borderBottomWidth: 1,
         borderBottomColor: '#e9ecef',
-        paddingVertical: 10,
-        minHeight: 40,
+        paddingVertical: 8,
+        minHeight: 32,
     },
     tableHeaderText: {
-        fontSize: 12,
+        fontSize: 10,
         fontWeight: '600',
         color: '#343a40',
-        letterSpacing: 0.2,
+        letterSpacing: 0.1,
         textTransform: 'uppercase',
     },
     tableCell: {
-        paddingHorizontal: 8,
+        paddingHorizontal: 6,
         justifyContent: 'center',
         alignItems: 'center',
     },
     imageCell: {
-        width: 50,
+        width: 40,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -988,7 +1115,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     actionCell: {
-        width: 50,
+        width: 40,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -996,57 +1123,57 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         borderBottomWidth: 1,
         borderBottomColor: '#f1f3f5',
-        paddingVertical: 10,
+        paddingVertical: 6,
         backgroundColor: '#ffffff',
-        minHeight: 50,
+        minHeight: 36,
         alignItems: 'center',
     },
     tableImage: {
-        width: 32,
-        height: 32,
-        borderRadius: 4,
+        width: 28,
+        height: 28,
+        borderRadius: 3,
     },
     tableImagePlaceholder: {
-        width: 32,
-        height: 32,
-        borderRadius: 4,
+        width: 28,
+        height: 28,
+        borderRadius: 3,
         backgroundColor: '#f5f5f5',
         justifyContent: 'center',
         alignItems: 'center',
     },
     tableProductName: {
-        fontSize: 14,
+        fontSize: 12,
         fontWeight: '500',
         color: '#212529',
-        marginBottom: 2,
+        marginBottom: 1,
     },
     tableSku: {
-        fontSize: 11,
+        fontSize: 9,
         color: '#6c757d',
     },
     tablePrice: {
-        fontSize: 14,
+        fontSize: 12,
         fontWeight: '700',
         color: '#1976d2',
     },
     tableStock: {
-        fontSize: 13,
+        fontSize: 11,
         fontWeight: '500',
-        marginBottom: 2,
+        marginBottom: 1,
     },
     tableStatusBadge: {
-        borderRadius: 4,
-        paddingVertical: 2,
-        paddingHorizontal: 6,
-        marginTop: 3,
+        borderRadius: 3,
+        paddingVertical: 1,
+        paddingHorizontal: 4,
+        marginTop: 2,
     },
     tableStatusText: {
         color: '#fff',
-        fontSize: 10,
+        fontSize: 8,
         fontWeight: '600',
     },
     tableActionButton: {
-        padding: 8,
+        padding: 6,
     },
     tableListContainer: {
         flexGrow: 1,
@@ -1054,17 +1181,17 @@ const styles = StyleSheet.create({
 
     fabButton: {
         position: 'absolute',
-        bottom: 32,
-        right: 24,
-        width: 60,
-        height: 60,
-        borderRadius: 30,
+        bottom: 24,
+        right: 16,
+        width: 52,
+        height: 52,
+        borderRadius: 26,
         backgroundColor: '#1976d2',
         justifyContent: 'center',
         alignItems: 'center',
         shadowColor: '#1976d2',
         shadowOpacity: 0.3,
-        shadowRadius: 10,
-        elevation: 8,
+        shadowRadius: 8,
+        elevation: 6,
     },
 });
