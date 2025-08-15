@@ -52,6 +52,18 @@ export default function ProtectedTabs() {
           href: null, // Hide from tab bar
         }}
       />
+      <Tabs.Screen
+        name="create-product"
+        options={{
+          href: null, // Hide from tab bar
+        }}
+      />
+      <Tabs.Screen
+        name="edit-product"
+        options={{
+          href: null, // Hide from tab bar
+        }}
+      />
     </Tabs>
   );
 }
