@@ -29,6 +29,7 @@ interface UserData {
     role: 'admin' | 'manager' | 'staff';
     status: 'active' | 'inactive';
     addedAt?: Date;
+    isPlaceholder?: boolean;
 }
 
 export default function ConfigScreen() {
@@ -146,6 +147,7 @@ export default function ConfigScreen() {
                     role: userData.role || 'staff',
                     status: userData.status || 'active',
                     addedAt: userData.addedAt?.toDate(),
+                    isPlaceholder: userData.isPlaceholder || false,
                 });
             }
 
@@ -163,32 +165,62 @@ export default function ConfigScreen() {
 
         setAddingUser(true);
         try {
-            // Check if user exists in Firebase Auth by email
-            // Since we can't query auth directly from client, we'll check users collection
+            // First, check if user exists in the users collection
             const usersSnapshot = await firestore()
                 .collection('users')
                 .where('email', '==', newUserEmail.trim())
                 .get();
 
-            if (usersSnapshot.empty) {
-                showSnackbar('User not found. Please ensure they have registered in the app.', 'error');
+            let existingUserData = null;
+            let userId = null;
+
+            if (!usersSnapshot.empty) {
+            // User exists in our users collection
+                const existingUserDoc = usersSnapshot.docs[0];
+                existingUserData = existingUserDoc.data();
+                userId = existingUserData.userId;
+
+                // Check if user is already part of this merchant
+                if (existingUserData.marchants?.includes(merchantData.id)) {
+                    showSnackbar('User is already part of this merchant.', 'error');
+                    return;
+                }
+            } else {
+                // User doesn't exist in our collection yet, but they might be registered in Firebase Auth
+                // We'll create a placeholder entry and let them complete their profile when they log in
+
+                // For now, we'll create a basic user document with the email
+                // The user will get proper data populated when they first log in
+
+                // Generate a temporary document ID for this email-based user
+                const tempUserRef = firestore().collection('users').doc();
+                userId = tempUserRef.id;
+
+                // Create basic user document
+                await tempUserRef.set({
+                    userId: userId,
+                    email: newUserEmail.trim(),
+                    displayName: newUserEmail.trim().split('@')[0], // Use email prefix as temporary display name
+                    photoURL: '',
+                    marchants: [merchantData.id],
+                    role: 'staff', // Default role
+                    status: 'active',
+                    createdAt: new Date(),
+                    addedAt: new Date(),
+                    isPlaceholder: true, // Flag to indicate this is a placeholder until user logs in
+                });
+
+                setNewUserEmail("");
+                fetchUsers(); // Refresh the users list
+                showSnackbar('User added successfully! They can now access this merchant when they log in.', 'success');
                 return;
             }
 
-            const existingUserDoc = usersSnapshot.docs[0];
-            const existingUserData = existingUserDoc.data();
-
-            // Check if user is already part of this merchant
-            if (existingUserData.marchants?.includes(merchantData.id)) {
-                showSnackbar('User is already part of this merchant.', 'error');
-                return;
-            }
-
-            // Add merchant to user's marchants array
+            // If user exists, add merchant to their marchants array
             const currentMarchants = existingUserData.marchants || [];
             await firestore()
                 .collection('users')
-                .doc(existingUserData.userId)
+                .doc(userId)
                 .update({
                     marchants: [...currentMarchants, merchantData.id],
                     // Also save email if not already saved (for future reference)
@@ -342,9 +374,35 @@ export default function ConfigScreen() {
     if (!merchantData) {
         return (
             <SafeAreaView style={{ flex: 1, backgroundColor: '#f6f8fa' }}>
-                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                <View style={styles.container}>
                     <LogoBrand size="large" />
-                    <Text style={{ color: '#d32f2f', marginTop: 12, fontSize: 16 }}>No merchant data found</Text>
+
+                    {/* Header with Logout - even when no merchant data */}
+                    <View style={styles.headerContainer}>
+                        <View style={styles.titleContainer}>
+                            <Text style={styles.title}>Account Settings</Text>
+                            <Text style={styles.subtitle}>No merchant access found.</Text>
+                        </View>
+                        <TouchableOpacity
+                            style={styles.logoutButton}
+                            onPress={handleLogout}
+                            activeOpacity={0.85}
+                        >
+                            <Text style={styles.logoutButtonText}>Logout</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.card}>
+                        <View style={styles.section}>
+                            <Text style={[styles.sectionTitle, { color: '#d32f2f' }]}>No Merchant Access</Text>
+                            <Text style={{ color: '#6a7a90', fontSize: 15, lineHeight: 22, marginBottom: 16 }}>
+                                You don&apos;t have access to any merchants yet. Please contact your administrator to get access.
+                            </Text>
+                            <Text style={{ color: '#8a99b3', fontSize: 13, lineHeight: 20 }}>
+                                If you believe this is an error, please try logging out and logging back in, or contact support.
+                            </Text>
+                        </View>
+                    </View>
                 </View>
             </SafeAreaView>
         );
@@ -394,32 +452,32 @@ export default function ConfigScreen() {
                         {tab === 'basic' && (
                             <View style={styles.section}>
                                 <Text style={styles.sectionTitle}>Basic Information</Text>
-                                <TextInput style={styles.input} placeholder="Merchant Name" value={name} onChangeText={setName} />
+                                <TextInput style={styles.input} placeholder="Merchant Name" placeholderTextColor="#8a99b3" value={name} onChangeText={setName} />
                                 {errors.name ? <Text style={{ color: '#d32f2f', marginBottom: 8, marginLeft: 2, fontSize: 13 }}>{errors.name}</Text> : null}
-                                <TextInput style={styles.input} placeholder="GSTIN (optional)" value={gstin} onChangeText={setGstin} />
-                                <TextInput style={styles.input} placeholder="Info (optional)" value={info} onChangeText={setInfo} multiline numberOfLines={3} />
+                                <TextInput style={styles.input} placeholder="GSTIN (optional)" placeholderTextColor="#8a99b3" value={gstin} onChangeText={setGstin} />
+                                <TextInput style={styles.input} placeholder="Info (optional)" placeholderTextColor="#8a99b3" value={info} onChangeText={setInfo} multiline numberOfLines={3} />
                             </View>
                         )}
                         {tab === 'contact' && (
                             <View style={styles.section}>
                                 <Text style={styles.sectionTitle}>Contact Information</Text>
-                                <TextInput style={styles.input} placeholder="Contact Number" value={contactNum} onChangeText={setContactNum} keyboardType="phone-pad" />
+                                <TextInput style={styles.input} placeholder="Contact Number" placeholderTextColor="#8a99b3" value={contactNum} onChangeText={setContactNum} keyboardType="phone-pad" />
                                 {errors.contactNum ? <Text style={{ color: '#d32f2f', marginBottom: 8, marginLeft: 2, fontSize: 13 }}>{errors.contactNum}</Text> : null}
-                                <TextInput style={styles.input} placeholder="Email" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
+                                <TextInput style={styles.input} placeholder="Email" placeholderTextColor="#8a99b3" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
                                 {errors.email ? <Text style={{ color: '#d32f2f', marginBottom: 8, marginLeft: 2, fontSize: 13 }}>{errors.email}</Text> : null}
-                                <TextInput style={styles.input} placeholder="Address Line 1" value={address} onChangeText={setAddress} />
+                                <TextInput style={styles.input} placeholder="Address Line 1" placeholderTextColor="#8a99b3" value={address} onChangeText={setAddress} />
                                 <View style={styles.rowInputs}>
-                                    <TextInput style={[styles.input, styles.inputRowCol]} placeholder="City" value={city} onChangeText={setCity} />
-                                    <TextInput style={[styles.input, styles.inputRowCol]} placeholder="State" value={state} onChangeText={setState} />
-                                    <TextInput style={[styles.input, styles.inputRowCol]} placeholder="Zip" value={zip} onChangeText={setZip} keyboardType="number-pad" />
+                                    <TextInput style={[styles.input, styles.inputRowCol]} placeholder="City" placeholderTextColor="#8a99b3" value={city} onChangeText={setCity} />
+                                    <TextInput style={[styles.input, styles.inputRowCol]} placeholder="State" placeholderTextColor="#8a99b3" value={state} onChangeText={setState} />
+                                    <TextInput style={[styles.input, styles.inputRowCol]} placeholder="Zip" placeholderTextColor="#8a99b3" value={zip} onChangeText={setZip} keyboardType="number-pad" />
                                 </View>
                             </View>
                         )}
                         {tab === 'config' && (
                             <View style={styles.section}>
                                 <Text style={styles.sectionTitle}>Configuration</Text>
-                                <TextInput style={styles.input} placeholder="Logo URL (optional)" value={logoUrl} onChangeText={setLogoUrl} />
-                                <TextInput style={styles.input} placeholder="UPI IDs (comma separated)" value={upiIds} onChangeText={setUpiIds} />
+                                <TextInput style={styles.input} placeholder="Logo URL (optional)" placeholderTextColor="#8a99b3" value={logoUrl} onChangeText={setLogoUrl} />
+                                <TextInput style={styles.input} placeholder="UPI IDs (comma separated)" placeholderTextColor="#8a99b3" value={upiIds} onChangeText={setUpiIds} />
                                 <Text style={styles.helperText}>Add all UPI IDs your business accepts, separated by commas.</Text>
                             </View>
                         )}
@@ -434,6 +492,7 @@ export default function ConfigScreen() {
                                         <TextInput
                                             style={[styles.input, styles.addUserInput]}
                                             placeholder="Enter user email"
+                                            placeholderTextColor="#8a99b3"
                                             value={newUserEmail}
                                             onChangeText={setNewUserEmail}
                                             keyboardType="email-address"
@@ -450,7 +509,7 @@ export default function ConfigScreen() {
                                             </Text>
                                         </TouchableOpacity>
                                     </View>
-                                    <Text style={styles.helperText}>User must be registered in the app to be added.</Text>
+                                    <Text style={styles.helperText}>Enter the email address of the user you want to add. They will be able to access this merchant when they log in.</Text>
                                 </View>
 
                                 {/* Users List */}
@@ -486,6 +545,7 @@ export default function ConfigScreen() {
                                                                 )}
                                                                 <Text style={styles.userStatus}>
                                                                     {user.status === 'active' ? '🟢' : '🔴'} {user.role}
+                                                                    {user.isPlaceholder && ' (Pending login)'}
                                                                 </Text>
                                                             </View>
                                                             <View style={styles.userActions}>

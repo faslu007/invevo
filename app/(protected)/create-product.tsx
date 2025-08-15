@@ -1,11 +1,15 @@
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
+import storage from '@react-native-firebase/storage';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
+    Image,
     Modal,
     SafeAreaView,
     ScrollView,
@@ -46,6 +50,50 @@ const measurementUnits = [
   { label: 'Packet', value: 'packet' },
 ];
 
+// Separate ProductForm component to reduce main component complexity
+function ProductFormUI({
+    formData,
+    errors,
+    loading,
+    handleCreate,
+    updateFormData,
+    showDatePicker,
+    setShowDatePicker,
+    selectedDate,
+    setSelectedDate,
+    showUnitPicker,
+    setShowUnitPicker,
+    pickImage,
+    takePicture,
+    removeImage,
+    uploading,
+    imageUri,
+    formatDateToIndian,
+}: {
+    formData: ProductFormData;
+    errors: { [key: string]: string };
+    loading: boolean;
+    handleCreate: () => Promise<void>;
+    updateFormData: (field: keyof ProductFormData, value: string) => void;
+    showDatePicker: boolean;
+    setShowDatePicker: (show: boolean) => void;
+    selectedDate: Date | null;
+    setSelectedDate: (date: Date | null) => void;
+    showUnitPicker: boolean;
+    setShowUnitPicker: (show: boolean) => void;
+    pickImage: () => Promise<void>;
+    takePicture: () => Promise<void>;
+    removeImage: () => void;
+    uploading: boolean;
+    imageUri: string | null;
+    formatDateToIndian: (date: Date) => string;
+}) {
+    const scrollViewRef = useRef<ScrollView>(null);
+
+    // The UI rendering logic will be moved here later
+    return null;
+}
+
 export default function CreateProductScreen() {
   const { showSnackbar } = useSnackbar();
   const [loading, setLoading] = useState(false);
@@ -70,6 +118,10 @@ export default function CreateProductScreen() {
   });
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
+
+    // Image upload states
+    const [uploading, setUploading] = useState(false);
+    const [imageUri, setImageUri] = useState<string | null>(null);
 
   // Reset form when screen is focused to prevent state leakage from edit screen
   useFocusEffect(
@@ -121,6 +173,110 @@ export default function CreateProductScreen() {
     return '';
   };
 
+    // Image handling functions
+    const pickImage = async () => {
+        try {
+            const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+            if (permissionResult.granted === false) {
+                Alert.alert('Permission Required', 'Permission to access camera roll is required!');
+                return;
+            }
+
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.7,
+            });
+
+            if (!result.canceled && result.assets[0]) {
+                setImageUri(result.assets[0].uri);
+                await uploadImage(result.assets[0].uri);
+            }
+        } catch (error) {
+            console.error('Error picking image:', error);
+            showSnackbar('Failed to pick image. Please try again.', 'error');
+        }
+    };
+
+    const takePicture = async () => {
+        try {
+            const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+
+            if (permissionResult.granted === false) {
+                Alert.alert('Permission Required', 'Permission to access camera is required!');
+                return;
+            }
+
+            const result = await ImagePicker.launchCameraAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.7,
+            });
+
+            if (!result.canceled && result.assets[0]) {
+                setImageUri(result.assets[0].uri);
+                await uploadImage(result.assets[0].uri);
+            }
+        } catch (error) {
+            console.error('Error taking picture:', error);
+            showSnackbar('Failed to take picture. Please try again.', 'error');
+        }
+    };
+
+    const uploadImage = async (uri: string) => {
+        setUploading(true);
+        try {
+            const user = auth().currentUser;
+            if (!user) {
+                showSnackbar('User not authenticated', 'error');
+                return;
+            }
+
+            // Create unique filename
+            const timestamp = Date.now();
+            const filename = `products/${user.uid}/${timestamp}.jpg`;
+
+            // Upload to Firebase Storage
+            const reference = storage().ref(filename);
+            await reference.putFile(uri);
+
+            // Get download URL
+            const downloadURL = await reference.getDownloadURL();
+
+            // Update form data with the image URL
+            updateFormData('imageUrl', downloadURL);
+            showSnackbar('Image uploaded successfully!', 'success');
+
+        } catch (error) {
+            console.error('Error uploading image:', error);
+            showSnackbar('Failed to upload image. Please try again.', 'error');
+            setImageUri(null);
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    const removeImage = () => {
+        Alert.alert(
+            'Remove Image',
+            'Are you sure you want to remove this image?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Remove',
+                    style: 'destructive',
+                    onPress: () => {
+                        setImageUri(null);
+                        updateFormData('imageUrl', '');
+                    },
+                },
+            ]
+        );
+    };
+
   const validateForm = (): boolean => {
     const newErrors: { [key: string]: string } = {};
 
@@ -129,11 +285,11 @@ export default function CreateProductScreen() {
     }
     if (!formData.category.trim()) {
       newErrors.category = 'Category is required';
-    }
-    if (!formData.brand.trim()) {
-      newErrors.brand = 'Brand is required';
-    }
-    if (!formData.sellingPrice.trim()) {
+      }
+      if (!formData.brand.trim()) {
+          newErrors.brand = 'Brand is required';
+      }
+      if (!formData.sellingPrice.trim()) {
       newErrors.sellingPrice = 'Selling price is required';
     } else if (isNaN(Number(formData.sellingPrice)) || Number(formData.sellingPrice) <= 0) {
       newErrors.sellingPrice = 'Please enter a valid selling price';
@@ -164,67 +320,87 @@ export default function CreateProductScreen() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleCreate = async () => {
-    if (!validateForm()) {
-      showSnackbar('Please fix the errors in the form', 'error');
-      return;
-    }
+    // Helper function to get merchant ID
+    const getMerchantId = async (userId: string) => {
+        const userDoc = await firestore().collection('users').doc(userId).get();
+        const userData = userDoc.exists() ? userDoc.data() : null;
+        const merchantIds = userData?.marchants || [];
 
-    setLoading(true);
-    try {
-      const user = auth().currentUser;
-      if (!user) {
-        showSnackbar('User not authenticated', 'error');
-        return;
+        if (merchantIds.length === 0) {
+          throw new Error('No merchant found');
       }
 
-      // Get merchant ID
-      const userDoc = await firestore().collection('users').doc(user.uid).get();
-      const userData = userDoc.exists() ? userDoc.data() : null;
-      const merchantIds = userData?.marchants || [];
+        return merchantIds[0];
+    };
 
-      if (merchantIds.length === 0) {
-        showSnackbar('No merchant found. Please set up merchant first.', 'error');
-        return;
-      }
-
-      const merchantId = merchantIds[0];
-      const sku = generateSKU(formData.productName, formData.category);
+    // Helper function to prepare product data
+    const prepareProductData = (merchantId: string, userId: string) => {
+        const sku = generateSKU(formData.productName, formData.category);
+      const now = new Date();
 
       // Parse dates from Indian format (DD/MM/YYYY)
       const expiryDate = formData.expiryDate ? (() => {
-        const isoDate = parseIndianDateToISO(formData.expiryDate);
-        return isoDate ? new Date(isoDate) : null;
+          const isoDate = parseIndianDateToISO(formData.expiryDate);
+          return isoDate ? new Date(isoDate) : null;
       })() : null;
-      const now = new Date();
 
-      const productData = {
-        productName: formData.productName.trim(),
-        sku,
-        category: formData.category.trim(),
-        brand: formData.brand.trim(),
-        sellingPrice: Number(formData.sellingPrice),
-        cost: Number(formData.cost),
-        defaultDiscount: Number(formData.defaultDiscount) || 0,
-        stockQuantity: Number(formData.stockQuantity),
-        minStock: Number(formData.minStock),
-        measurementUnit: formData.measurementUnit,
-        imageUrl: formData.imageUrl.trim() || null,
-        expiryDate: expiryDate,
-        additionalNotes: formData.additionalNotes.trim() || null,
-        vendorDetails: formData.vendorDetails.trim() || null,
-        active: true,
-        merchantId,
-        createdUserId: user.uid,
-        updatedUserId: user.uid,
+      return {
+          productName: formData.productName.trim(),
+          sku,
+          category: formData.category.trim(),
+          brand: formData.brand.trim(),
+          sellingPrice: Number(formData.sellingPrice),
+          cost: Number(formData.cost),
+          defaultDiscount: Number(formData.defaultDiscount) || 0,
+          stockQuantity: Number(formData.stockQuantity),
+          minStock: Number(formData.minStock),
+          measurementUnit: formData.measurementUnit,
+          imageUrl: formData.imageUrl.trim() || null,
+          expiryDate: expiryDate,
+          additionalNotes: formData.additionalNotes.trim() || null,
+          vendorDetails: formData.vendorDetails.trim() || null,
+          active: true,
+          merchantId,
+        createdUserId: userId,
+        updatedUserId: userId,
         createdAt: now,
         updatedAt: now,
-      };
+    };
+  };
 
-      await firestore().collection('products').add(productData);
+    const handleCreate = async () => {
+        if (!validateForm()) {
+            showSnackbar('Please fix the errors in the form', 'error');
+            return;
+        }
 
-      showSnackbar('Product created successfully!', 'success');
-      router.push('/(protected)/product');
+        setLoading(true);
+        try {
+            const user = auth().currentUser;
+            if (!user) {
+                showSnackbar('User not authenticated', 'error');
+                return;
+            }
+
+            try {
+                // Get merchant ID
+                const merchantId = await getMerchantId(user.uid);
+
+                // Prepare product data
+                const productData = prepareProductData(merchantId, user.uid);
+
+    // Save to Firestore
+          await firestore().collection('products').add(productData);
+
+          showSnackbar('Product created successfully!', 'success');
+          router.push('/(protected)/product');
+      } catch (error) {
+            if (error instanceof Error && error.message === 'No merchant found') {
+                showSnackbar('No merchant found. Please set up merchant first.', 'error');
+            } else {
+                throw error;
+            }
+        }
     } catch (error) {
       console.error('Error creating product:', error);
       showSnackbar('Failed to create product. Please try again.', 'error');
@@ -295,6 +471,7 @@ export default function CreateProductScreen() {
               <TextInput
                 style={[styles.input, errors.category && styles.inputError]}
                 placeholder="e.g., Electronics"
+                              placeholderTextColor="#9e9e9e"
                 value={formData.category}
                 onChangeText={(value) => updateFormData('category', value)}
                 autoCapitalize="words"
@@ -306,6 +483,7 @@ export default function CreateProductScreen() {
               <TextInput
                 style={[styles.input, errors.brand && styles.inputError]}
                 placeholder="e.g., Samsung"
+                              placeholderTextColor="#9e9e9e"
                 value={formData.brand}
                 onChangeText={(value) => updateFormData('brand', value)}
                 autoCapitalize="words"
@@ -325,6 +503,7 @@ export default function CreateProductScreen() {
               <TextInput
                 style={[styles.input, errors.sellingPrice && styles.inputError]}
                 placeholder="0.00"
+                              placeholderTextColor="#9e9e9e"
                 value={formData.sellingPrice}
                 onChangeText={(value) => updateFormData('sellingPrice', value)}
                 keyboardType="decimal-pad"
@@ -336,6 +515,7 @@ export default function CreateProductScreen() {
               <TextInput
                 style={[styles.input, errors.cost && styles.inputError]}
                 placeholder="0.00"
+                              placeholderTextColor="#9e9e9e"
                 value={formData.cost}
                 onChangeText={(value) => updateFormData('cost', value)}
                 keyboardType="decimal-pad"
@@ -346,7 +526,7 @@ export default function CreateProductScreen() {
 
           {/* Stock and Unit Row */}
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>📊 Inventory Management</Text>
+                      <Text style={styles.sectionTitle}>📊 Inventory Management</Text>
           </View>
           
           <View style={styles.row}>
@@ -355,26 +535,28 @@ export default function CreateProductScreen() {
               <TextInput
                 style={[styles.input, errors.stockQuantity && styles.inputError]}
                 placeholder="0"
+                              placeholderTextColor="#9e9e9e"
                 value={formData.stockQuantity}
                 onChangeText={(value) => updateFormData('stockQuantity', value)}
                 keyboardType="numeric"
               />
               {errors.stockQuantity && <Text style={styles.errorText}>{errors.stockQuantity}</Text>}
-            </View>
-            <View style={[styles.inputGroup, styles.halfWidth]}>
+                      </View>
+                      <View style={[styles.inputGroup, styles.halfWidth]}>
               <Text style={styles.label}>Min Stock *</Text>
               <TextInput
                 style={[styles.input, errors.minStock && styles.inputError]}
                 placeholder="5"
+                              placeholderTextColor="#9e9e9e"
                 value={formData.minStock}
                 onChangeText={(value) => updateFormData('minStock', value)}
                 keyboardType="numeric"
               />
               {errors.minStock && <Text style={styles.errorText}>{errors.minStock}</Text>}
-            </View>
-          </View>
+                      </View>
+                  </View>
 
-          {/* Measurement Unit */}
+                  { }
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Unit *</Text>
             <TouchableOpacity
@@ -392,35 +574,83 @@ export default function CreateProductScreen() {
             {errors.measurementUnit && <Text style={styles.errorText}>{errors.measurementUnit}</Text>}
           </View>
 
-          {/* Default Discount */}
-          <View style={styles.inputGroup}>
+                  {/* Default Discount */}
+                  <View style={styles.inputGroup}>
             <Text style={styles.label}>Default Discount (%)</Text>
             <TextInput
               style={[styles.input, errors.defaultDiscount && styles.inputError]}
               placeholder="0"
+                          placeholderTextColor="#9e9e9e"
               value={formData.defaultDiscount}
               onChangeText={(value) => updateFormData('defaultDiscount', value)}
               keyboardType="decimal-pad"
             />
             {errors.defaultDiscount && <Text style={styles.errorText}>{errors.defaultDiscount}</Text>}
-          </View>
+                  </View>
 
-          {/* Additional Details Section */}
+                  { }
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>📝 Additional Details</Text>
           </View>
 
-          {/* Image URL */}
+                  {/* Product Image */}
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Image URL (Optional)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="https://example.com/image.jpg"
-              value={formData.imageUrl}
-              onChangeText={(value) => updateFormData('imageUrl', value)}
-              keyboardType="url"
-              autoCapitalize="none"
-            />
+                      <Text style={styles.label}>Product Image (Optional)</Text>
+                      {imageUri || formData.imageUrl ? (
+                          <View style={styles.imageContainer}>
+                              <Image
+                                  source={{ uri: imageUri || formData.imageUrl }}
+                                  style={styles.productImage}
+                              />
+                              <View style={styles.imageOverlay}>
+                                  <TouchableOpacity
+                                      style={styles.imageActionButton}
+                                      onPress={pickImage}
+                                      disabled={uploading}
+                                  >
+                                      <Text style={styles.imageActionButtonText}>
+                                          Change
+                                      </Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                      style={[styles.imageActionButton, styles.removeButton]}
+                                      onPress={removeImage}
+                                      disabled={uploading}
+                                  >
+                                      <Text style={styles.imageActionButtonText}>Remove</Text>
+                                  </TouchableOpacity>
+                              </View>
+                              {uploading && (
+                                  <View style={styles.uploadingOverlay}>
+                                      <ActivityIndicator size="large" color="#fff" />
+                                      <Text style={styles.uploadingText}>Uploading...</Text>
+                                  </View>
+                              )}
+                          </View>
+                      ) : (
+                          <View style={styles.imageInputContainer}>
+                              <TouchableOpacity
+                                  style={[styles.imagePicker, uploading && styles.disabled]}
+                                  onPress={pickImage}
+                                  disabled={uploading}
+                              >
+                                  <Text style={styles.imagePickerIcon}>🖼️</Text>
+                                  <Text style={styles.imagePickerText}>Select from gallery</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                  style={[styles.imagePicker, uploading && styles.disabled]}
+                                  onPress={takePicture}
+                                  disabled={uploading}
+                              >
+                                  <Text style={styles.imagePickerIcon}>📷</Text>
+                                  <Text style={styles.imagePickerText}>Take a picture</Text>
+                              </TouchableOpacity>
+                              {uploading && (
+                                  <ActivityIndicator size="large" color="#1976d2" style={{ marginTop: 20 }} />
+                              )}
+                          </View>
+                      )}
+                      <Text style={styles.helperText}>JPG, PNG • Max 5MB</Text>
           </View>
 
           {/* Expiry Date */}
@@ -430,7 +660,7 @@ export default function CreateProductScreen() {
               style={[styles.input, styles.selectInput]}
               onPress={() => setShowDatePicker(true)}
             >
-              <Text style={[styles.selectText, !formData.expiryDate && styles.placeholderText]}>
+                          <Text style={[styles.selectText, !formData.expiryDate && styles.placeholderText]}>
                 {formData.expiryDate || 'Select Date (DD/MM/YYYY)'}
               </Text>
               <Text style={styles.selectArrow}>📅</Text>
@@ -444,55 +674,57 @@ export default function CreateProductScreen() {
             <TextInput
               style={[styles.input, styles.textArea]}
               placeholder="Vendor name, contact info, etc."
+                          placeholderTextColor="#9e9e9e"
               value={formData.vendorDetails}
               onChangeText={(value) => updateFormData('vendorDetails', value)}
               multiline
               numberOfLines={3}
-              textAlignVertical="top"
-            />
+                          textAlignVertical="top"
+                      />
           </View>
 
           {/* Additional Notes */}
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Additional Notes (Optional)</Text>
             <TextInput
-              style={[styles.input, styles.textArea]}
+                          style={[styles.input, styles.textArea]}
               placeholder="Any additional information..."
-              value={formData.additionalNotes}
-              onChangeText={(value) => updateFormData('additionalNotes', value)}
-              multiline
-              numberOfLines={3}
-              textAlignVertical="top"
-            />
-          </View>
+                          placeholderTextColor="#9e9e9e"
+                          value={formData.additionalNotes}
+                          onChangeText={(value) => updateFormData('additionalNotes', value)}
+                          multiline
+                          numberOfLines={3}
+                          textAlignVertical="top"
+                      />
+                  </View>
 
-          {/* Create Button */}
-          <TouchableOpacity
-            style={[styles.createButton, loading && styles.buttonDisabled]}
-            onPress={() => {
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              handleCreate();
-            }}
-            disabled={loading}
-            activeOpacity={0.9}
-          >
-            {loading ? (
-              <View style={styles.loadingRow}>
-                <ActivityIndicator size="small" color="#fff" />
-                <Text style={[styles.createButtonText, { marginLeft: 10 }]}>Creating...</Text>
+                  {/* Create Button */}
+                  <TouchableOpacity
+                      style={[styles.createButton, loading && styles.buttonDisabled]}
+                      onPress={() => {
+                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                          handleCreate();
+                      }}
+                      disabled={loading}
+                      activeOpacity={0.9}
+                  >
+                      {loading ? (
+                          <View style={styles.loadingRow}>
+                              <ActivityIndicator size="small" color="#fff" />
+                              <Text style={[styles.createButtonText, { marginLeft: 10 }]}>Creating...</Text>
+                          </View>
+                      ) : (
+                          <Text style={styles.createButtonText}>✨ Create Product</Text>
+                      )}
+                  </TouchableOpacity>
               </View>
-            ) : (
-              <Text style={styles.createButtonText}>✨ Create Product</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+          </ScrollView>
 
-      {/* Unit Picker Modal */}
-      <Modal
-        visible={showUnitPicker}
-        transparent={true}
-        animationType="slide"
+          {/* Unit Picker Modal */}
+          <Modal
+              visible={showUnitPicker}
+              transparent={true}
+              animationType="slide"
         onRequestClose={() => setShowUnitPicker(false)}
       >
         <View style={styles.modalOverlay}>
@@ -514,7 +746,7 @@ export default function CreateProductScreen() {
                   ]}
                   onPress={() => {
                     updateFormData('measurementUnit', item.value);
-                    setShowUnitPicker(false);
+                      setShowUnitPicker(false);
                   }}
                 >
                   <Text style={[
@@ -530,8 +762,8 @@ export default function CreateProductScreen() {
         </View>
       </Modal>
 
-      {/* Date Picker Modal */}
-      <Modal
+          {/* Enhanced Date Picker Modal */}
+          <Modal
         visible={showDatePicker}
         transparent={true}
         animationType="slide"
@@ -546,169 +778,224 @@ export default function CreateProductScreen() {
               </TouchableOpacity>
             </View>
             <View style={styles.datePickerContainer}>
-              <Text style={styles.datePickerLabel}>Choose a date in Indian format (DD/MM/YYYY):</Text>
-              <View style={styles.simpleDatePicker}>
-                <TextInput
-                  style={styles.dateInput}
-                  placeholder="DD"
-                  maxLength={2}
-                  keyboardType="numeric"
-                  onChangeText={(value) => {
-                    if (parseInt(value) <= 31) {
-                      setSelectedDate(prev => {
-                        const date = prev || new Date();
-                        date.setDate(parseInt(value) || 1);
-                        return new Date(date);
-                      });
-                    }
-                  }}
-                />
-                <Text style={styles.dateSeparator}>/</Text>
-                <TextInput
-                  style={styles.dateInput}
-                  placeholder="MM"
-                  maxLength={2}
-                  keyboardType="numeric"
-                  onChangeText={(value) => {
-                    if (parseInt(value) <= 12) {
-                      setSelectedDate(prev => {
-                        const date = prev || new Date();
-                        date.setMonth((parseInt(value) || 1) - 1);
-                        return new Date(date);
-                      });
-                    }
-                  }}
-                />
-                <Text style={styles.dateSeparator}>/</Text>
-                <TextInput
-                  style={[styles.dateInput, styles.yearInput]}
-                  placeholder="YYYY"
-                  maxLength={4}
-                  keyboardType="numeric"
-                  onChangeText={(value) => {
-                    if (value.length === 4) {
-                      setSelectedDate(prev => {
-                        const date = prev || new Date();
-                        date.setFullYear(parseInt(value));
-                        return new Date(date);
-                      });
-                    }
-                  }}
-                />
+                          <Text style={styles.datePickerLabel}>Select expiry date (DD/MM/YYYY):</Text>
+
+                          {/* Enhanced Date Picker with dropdowns */}
+                          <View style={styles.datePickerRow}>
+                              {/* Day Picker */}
+                              <View style={styles.datePickerColumn}>
+                                  <Text style={styles.datePickerColumnLabel}>Day</Text>
+                                  <ScrollView style={styles.datePickerScroll} showsVerticalScrollIndicator={false}>
+                                      {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                                          <TouchableOpacity
+                                              key={day}
+                                              style={[
+                                                  styles.datePickerOption,
+                                                  selectedDate?.getDate() === day && styles.datePickerOptionSelected
+                                              ]}
+                                              onPress={() => {
+                                                  const newDate = selectedDate ? new Date(selectedDate) : new Date();
+                                                  newDate.setDate(day);
+                                                  setSelectedDate(newDate);
+                                              }}
+                                          >
+                                              <Text style={[
+                                                  styles.datePickerOptionText,
+                                                  selectedDate?.getDate() === day && styles.datePickerOptionTextSelected
+                                              ]}>
+                                                  {day.toString().padStart(2, '0')}
+                                              </Text>
+                                          </TouchableOpacity>
+                                      ))}
+                                  </ScrollView>
+                              </View>
+
+                              {/* Month Picker */}
+                              <View style={styles.datePickerColumn}>
+                                  <Text style={styles.datePickerColumnLabel}>Month</Text>
+                                  <ScrollView style={styles.datePickerScroll} showsVerticalScrollIndicator={false}>
+                                      {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
+                                          <TouchableOpacity
+                                              key={month}
+                                              style={[
+                                                  styles.datePickerOption,
+                                                  selectedDate && selectedDate.getMonth() + 1 === month && styles.datePickerOptionSelected
+                                              ]}
+                                              onPress={() => {
+                                                  const newDate = selectedDate ? new Date(selectedDate) : new Date();
+                                                  newDate.setMonth(month - 1);
+                                                  setSelectedDate(newDate);
+                                              }}
+                                          >
+                                              <Text style={[
+                                                  styles.datePickerOptionText,
+                                                  selectedDate && selectedDate.getMonth() + 1 === month && styles.datePickerOptionTextSelected
+                                              ]}>
+                                                  {month.toString().padStart(2, '0')}
+                                              </Text>
+                                          </TouchableOpacity>
+                                      ))}
+                                  </ScrollView>
+                              </View>
+
+                              {/* Year Picker */}
+                              <View style={styles.datePickerColumn}>
+                                  <Text style={styles.datePickerColumnLabel}>Year</Text>
+                                  <ScrollView style={styles.datePickerScroll} showsVerticalScrollIndicator={false}>
+                                      {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() + i).map((year) => (
+                                          <TouchableOpacity
+                                              key={year}
+                                              style={[
+                                                  styles.datePickerOption,
+                                                  selectedDate?.getFullYear() === year && styles.datePickerOptionSelected
+                                              ]}
+                                              onPress={() => {
+                                                  const newDate = selectedDate ? new Date(selectedDate) : new Date();
+                                                  newDate.setFullYear(year);
+                                                  setSelectedDate(newDate);
+                                              }}
+                                          >
+                                              <Text style={[
+                                                  styles.datePickerOptionText,
+                                                  selectedDate?.getFullYear() === year && styles.datePickerOptionTextSelected
+                                              ]}>
+                                                  {year}
+                                              </Text>
+                                          </TouchableOpacity>
+                                      ))}
+                                  </ScrollView>
+                              </View>
+                          </View>
+
+                          {/* Selected Date Preview */}
+                          <View style={styles.datePreview}>
+                              <Text style={styles.datePreviewLabel}>Selected Date:</Text>
+                              <Text style={styles.datePreviewText}>
+                                  {selectedDate ? formatDateToIndian(selectedDate) : 'None'}
+                              </Text>
               </View>
-              <TouchableOpacity
-                style={styles.dateConfirmButton}
-                onPress={() => {
-                  if (selectedDate) {
-                    const formattedDate = formatDateToIndian(selectedDate);
-                    updateFormData('expiryDate', formattedDate);
-                  }
-                  setShowDatePicker(false);
-                }}
-              >
-                <Text style={styles.dateConfirmButtonText}>Confirm Date</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </SafeAreaView>
+
+                          <View style={styles.datePickerButtons}>
+                              <TouchableOpacity
+                                  style={styles.datePickerCancelButton}
+                                  onPress={() => setShowDatePicker(false)}
+                              >
+                                  <Text style={styles.datePickerCancelButtonText}>Cancel</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                  style={styles.datePickerConfirmButton}
+                                  onPress={() => {
+                                      if (selectedDate) {
+                                          const formattedDate = formatDateToIndian(selectedDate);
+                                          updateFormData('expiryDate', formattedDate);
+                                      }
+                                      setShowDatePicker(false);
+                                  }}
+                              >
+                                  <Text style={styles.datePickerConfirmButtonText}>Confirm</Text>
+                              </TouchableOpacity>
+                          </View>
+                      </View>
+                  </View>
+              </View>
+          </Modal>
+      </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-  },
-  scrollContainer: {
-    flexGrow: 1,
-    paddingBottom: 32,
-  },
-  header: {
-    backgroundColor: '#fff',
-    padding: 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
-  },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  backButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: '#f8f9fa',
-  },
-  backButtonText: {
-    color: '#1976d2',
-    fontWeight: '600',
-    fontSize: 15,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 4,
-    letterSpacing: 0.3,
-  },
-  subtitle: {
-    color: '#6c757d',
-    fontSize: 15,
-    fontWeight: '500',
-    letterSpacing: 0.2,
-  },
-  form: {
-    padding: 20,
-    backgroundColor: '#fff',
-  },
-  inputGroup: {
-    marginBottom: 20,
-  },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  halfWidth: {
-    flex: 1,
-  },
-  label: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1976d2',
-    marginBottom: 8,
-    letterSpacing: 0.1,
-  },
-  input: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 18,
-    fontSize: 16,
-    borderWidth: 2,
-    borderColor: '#e3e6ea',
-    shadowColor: '#1976d2',
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 3,
-  },
-  inputError: {
-    borderColor: '#f44336',
-    borderWidth: 2,
-  },
-  textArea: {
-    minHeight: 80,
-  },
-  selectInput: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
+    container: {
+        flex: 1,
+        backgroundColor: '#f8f9fa',
+    },
+    scrollContainer: {
+        flexGrow: 1,
+        paddingBottom: 32,
+    },
+    header: {
+        backgroundColor: '#fff',
+        padding: 20,
+        paddingBottom: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e9ecef',
+    },
+    headerTop: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    backButton: {
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: 8,
+        backgroundColor: '#f8f9fa',
+    },
+    backButtonText: {
+        color: '#1976d2',
+        fontWeight: '600',
+        fontSize: 15,
+    },
+    title: {
+        fontSize: 24,
+        fontWeight: '700',
+        color: '#1a1a1a',
+        marginBottom: 4,
+        letterSpacing: 0.3,
+    },
+    subtitle: {
+        color: '#6c757d',
+        fontSize: 15,
+        fontWeight: '500',
+        letterSpacing: 0.2,
+    },
+    form: {
+        padding: 20,
+        backgroundColor: '#fff',
+    },
+    inputGroup: {
+        marginBottom: 20,
+    },
+    row: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        gap: 12,
+    },
+    halfWidth: {
+        flex: 1,
+    },
+    label: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#1976d2',
+        marginBottom: 8,
+        letterSpacing: 0.1,
+    },
+    input: {
+        backgroundColor: '#fff',
+        borderRadius: 14,
+        padding: 18,
+        fontSize: 16,
+        borderWidth: 2,
+        borderColor: '#e3e6ea',
+        shadowColor: '#1976d2',
+        shadowOpacity: 0.08,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 3 },
+        elevation: 3,
+    },
+    inputError: {
+        borderColor: '#f44336',
+        borderWidth: 2,
+    },
+    textArea: {
+        minHeight: 80,
+    },
+    selectInput: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
   selectText: {
     fontSize: 16,
     color: '#333',
@@ -819,61 +1106,220 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+    sectionHeader: {
+        marginTop: 20,
+        marginBottom: 16,
+        paddingBottom: 8,
+        borderBottomColor: '#e9ecef',
+    },
+    sectionTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#1976d2',
+        letterSpacing: 0.3,
+    },
+    // Enhanced Date Picker Styles
   datePickerContainer: {
     padding: 20,
   },
   datePickerLabel: {
     fontSize: 16,
-    color: '#333',
-    marginBottom: 15,
+      fontWeight: '600',
+      color: '#1976d2',
+      marginBottom: 20,
     textAlign: 'center',
   },
-  simpleDatePicker: {
+    datePickerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
+        justifyContent: 'space-around',
+        marginBottom: 20,
+    },
+    datePickerColumn: {
+        flex: 1,
+        marginHorizontal: 5,
+    },
+    datePickerColumnLabel: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#666',
+        textAlign: 'center',
+        marginBottom: 10,
+    },
+    datePickerScroll: {
+        maxHeight: 120,
+        backgroundColor: '#f8f9fa',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#e3e6ea',
+    },
+    datePickerOption: {
+        padding: 10,
+        alignItems: 'center',
+        borderBottomWidth: 1,
+        borderBottomColor: '#e9ecef',
+    },
+    datePickerOptionSelected: {
+        backgroundColor: '#1976d2',
+    },
+    datePickerOptionText: {
+        fontSize: 16,
+        color: '#333',
+    },
+    datePickerOptionTextSelected: {
+        color: '#fff',
+        fontWeight: '600',
+    },
+    datePreview: {
+        backgroundColor: '#f0f4f8',
+        padding: 15,
+        borderRadius: 8,
+        alignItems: 'center',
+        marginBottom: 20,
   },
-  dateInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
+    datePreviewLabel: {
+        fontSize: 14,
+        color: '#666',
+        marginBottom: 5,
+    },
+    datePreviewText: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: '#1976d2',
+    },
+    datePickerButtons: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+    },
+    datePickerCancelButton: {
+        flex: 1,
+        padding: 12,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#ddd',
+        alignItems: 'center',
+        marginRight: 10,
+    },
+    datePickerCancelButtonText: {
+        color: '#666',
+        fontWeight: '600',
+    },
+    datePickerConfirmButton: {
+        flex: 1,
+        padding: 12,
+        borderRadius: 8,
+        backgroundColor: '#1976d2',
+        alignItems: 'center',
+        marginLeft: 10,
+    },
+    datePickerConfirmButtonText: {
+        color: '#fff',
+        fontWeight: '600',
+    },
+
+    // Image Upload Styles
+    imageContainer: {
+        width: '100%',
+        height: 200,
     borderRadius: 8,
-    padding: 12,
-    textAlign: 'center',
-    fontSize: 16,
-    backgroundColor: '#fff',
-    width: 50,
+      overflow: 'hidden',
+      position: 'relative',
+      marginBottom: 8,
   },
-  yearInput: {
-    width: 70,
+
+    productImage: {
+        width: '100%',
+        height: '100%',
+        resizeMode: 'cover',
   },
-  dateSeparator: {
-    fontSize: 18,
-    color: '#333',
-    marginHorizontal: 10,
+
+    imageOverlay: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        flexDirection: 'row',
+        padding: 8,
+        backgroundColor: 'rgba(0,0,0,0.4)',
   },
-  dateConfirmButton: {
+
+    imageActionButton: {
     backgroundColor: '#1976d2',
-    borderRadius: 12,
-    padding: 15,
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 4,
+        marginRight: 8,
+    },
+
+    removeButton: {
+        backgroundColor: '#d32f2f',
+    },
+
+    imageActionButtonText: {
+        color: '#fff',
+        fontSize: 14,
+        fontWeight: '500',
+    },
+
+    imagePicker: {
+        width: '48%',
+        height: 120,
+        borderWidth: 1,
+        borderColor: '#ccc',
+        borderStyle: 'dashed',
+        borderRadius: 8,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#f9f9f9',
+    },
+
+    imagePickerIcon: {
+        fontSize: 32,
+        marginBottom: 8,
+    },
+
+    imagePickerText: {
+        fontSize: 14,
+        color: '#555',
+        textAlign: 'center',
+    },
+
+    disabled: {
+        opacity: 0.5,
+    },
+
+    uploadingOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        justifyContent: 'center',
     alignItems: 'center',
   },
-  dateConfirmButtonText: {
+
+    uploadingText: {
     color: '#fff',
+      marginTop: 10,
     fontSize: 16,
-    fontWeight: '600',
+      fontWeight: '500',
   },
-  sectionHeader: {
-    marginTop: 20,
-    marginBottom: 16,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
+
+    imagePickerSubtext: {
+        fontSize: 12,
+        color: '#757575',
   },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1976d2',
-    letterSpacing: 0.3,
-  },
+
+    imageInputContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginBottom: 8,
+    },
+
+    imageHelperText: {
+        fontSize: 12,
+        color: '#757575',
+        marginTop: 4,
+        lineHeight: 16,
+    },
 });

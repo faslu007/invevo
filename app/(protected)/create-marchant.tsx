@@ -53,20 +53,43 @@ export default function CreateMarchant() {
                 createdBy: user.uid,
                 createdAt: new Date(),
             });
-            // Add user doc or update
-            await firestore().collection('users').doc(user.uid).set({
-                userId: user.uid,
-                email: user.email || '',
-                displayName: user.displayName || '',
-                photoURL: user.photoURL || '',
-                marchants: [marchantRef.id],
-                role: 'admin',
-                status: 'active',
-                createdAt: new Date(),
-            }, { merge: true });
+            // Add user doc or update existing one
+            // First check if user already has a document (maybe they were added as a placeholder)
+            const userDocRef = firestore().collection('users').doc(user.uid);
+            const existingUserDoc = await userDocRef.get();
+
+            if (existingUserDoc.exists()) {
+                // User document exists, update it with proper auth data and add merchant
+                const existingData = existingUserDoc.data();
+                const currentMarchants = existingData?.marchants || [];
+
+                await userDocRef.update({
+                    userId: user.uid,
+                    email: user.email || existingData?.email || '',
+                    displayName: user.displayName || existingData?.displayName || '',
+                    photoURL: user.photoURL || existingData?.photoURL || '',
+                    marchants: currentMarchants.includes(marchantRef.id) ? currentMarchants : [...currentMarchants, marchantRef.id],
+                    role: existingData?.role || 'admin',
+                    status: 'active',
+                    isPlaceholder: false, // Remove placeholder flag if it exists
+                    updatedAt: new Date(),
+                });
+            } else {
+                // Create new user document
+                await userDocRef.set({
+                    userId: user.uid,
+                    email: user.email || '',
+                    displayName: user.displayName || '',
+                    photoURL: user.photoURL || '',
+                    marchants: [marchantRef.id],
+                    role: 'admin',
+                    status: 'active',
+                    createdAt: new Date(),
+                });
+            }
             router.replace("/(protected)/home");
-        } catch (e) {
-            // handle error
+        } catch (error) {
+            console.error('Error creating merchant:', error);
         } finally {
             setLoading(false);
         }
@@ -98,32 +121,32 @@ export default function CreateMarchant() {
                         {tab === 'basic' && (
                             <View style={styles.section}>
                                 <Text style={styles.sectionTitle}>Basic</Text>
-                                <TextInput style={styles.input} placeholder="Merchant Name" value={name} onChangeText={setName} />
+                                <TextInput style={styles.input} placeholder="Merchant Name" placeholderTextColor="#8a99b3" value={name} onChangeText={setName} />
                                 {errors.name ? <Text style={{ color: '#d32f2f', marginBottom: 8, marginLeft: 2, fontSize: 13 }}>{errors.name}</Text> : null}
-                                <TextInput style={styles.input} placeholder="GSTIN (optional)" value={gstin} onChangeText={setGstin} />
-                                <TextInput style={styles.input} placeholder="Info (optional)" value={info} onChangeText={setInfo} />
+                                <TextInput style={styles.input} placeholder="GSTIN (optional)" placeholderTextColor="#8a99b3" value={gstin} onChangeText={setGstin} />
+                                <TextInput style={styles.input} placeholder="Info (optional)" placeholderTextColor="#8a99b3" value={info} onChangeText={setInfo} />
                             </View>
                         )}
                         {tab === 'contact' && (
                             <View style={styles.section}>
                                 <Text style={styles.sectionTitle}>Contact</Text>
-                                <TextInput style={styles.input} placeholder="Contact Number" value={contactNum} onChangeText={setContactNum} keyboardType="phone-pad" />
+                                <TextInput style={styles.input} placeholder="Contact Number" placeholderTextColor="#8a99b3" value={contactNum} onChangeText={setContactNum} keyboardType="phone-pad" />
                                 {errors.contactNum ? <Text style={{ color: '#d32f2f', marginBottom: 8, marginLeft: 2, fontSize: 13 }}>{errors.contactNum}</Text> : null}
-                                <TextInput style={styles.input} placeholder="Email" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
+                                <TextInput style={styles.input} placeholder="Email" placeholderTextColor="#8a99b3" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
                                 {errors.email ? <Text style={{ color: '#d32f2f', marginBottom: 8, marginLeft: 2, fontSize: 13 }}>{errors.email}</Text> : null}
-                                <TextInput style={styles.input} placeholder="Address Line 1" value={address} onChangeText={setAddress} />
+                                <TextInput style={styles.input} placeholder="Address Line 1" placeholderTextColor="#8a99b3" value={address} onChangeText={setAddress} />
                                 <View style={styles.rowInputs}>
-                                    <TextInput style={[styles.input, styles.inputRowCol]} placeholder="City" value={city} onChangeText={setCity} />
-                                    <TextInput style={[styles.input, styles.inputRowCol]} placeholder="State" value={state} onChangeText={setState} />
-                                    <TextInput style={[styles.input, styles.inputRowCol]} placeholder="Zip" value={zip} onChangeText={setZip} keyboardType="number-pad" />
+                                    <TextInput style={[styles.input, styles.inputRowCol]} placeholder="City" placeholderTextColor="#8a99b3" value={city} onChangeText={setCity} />
+                                    <TextInput style={[styles.input, styles.inputRowCol]} placeholder="State" placeholderTextColor="#8a99b3" value={state} onChangeText={setState} />
+                                    <TextInput style={[styles.input, styles.inputRowCol]} placeholder="Zip" placeholderTextColor="#8a99b3" value={zip} onChangeText={setZip} keyboardType="number-pad" />
                                 </View>
                             </View>
                         )}
                         {tab === 'config' && (
                             <View style={styles.section}>
                                 <Text style={styles.sectionTitle}>Config</Text>
-                                <TextInput style={styles.input} placeholder="Logo URL (optional)" value={logoUrl} onChangeText={setLogoUrl} />
-                                <TextInput style={styles.input} placeholder="UPI IDs (comma separated)" value={upiIds} onChangeText={setUpiIds} />
+                                <TextInput style={styles.input} placeholder="Logo URL (optional)" placeholderTextColor="#8a99b3" value={logoUrl} onChangeText={setLogoUrl} />
+                                <TextInput style={styles.input} placeholder="UPI IDs (comma separated)" placeholderTextColor="#8a99b3" value={upiIds} onChangeText={setUpiIds} />
                                 <Text style={styles.helperText}>Add all UPI IDs your business accepts, separated by commas.</Text>
                             </View>
                         )}

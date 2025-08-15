@@ -6,6 +6,8 @@ import { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
+    Image,
+    Modal,
     RefreshControl,
     SafeAreaView,
     ScrollView,
@@ -56,6 +58,7 @@ export default function ProductScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [merchantId, setMerchantId] = useState<string | null>(null);
+    const [viewMode, setViewMode] = useState<'card' | 'table'>('card');
     const [filters, setFilters] = useState<FilterState>({
         searchQuery: '',
         activeFilter: 'all',
@@ -200,6 +203,17 @@ export default function ProductScreen() {
         setRefreshing(false);
     }, [merchantId, fetchProducts]);
 
+    // Save view mode to local storage when it changes
+    useEffect(() => {
+        try {
+            // In a real app, you might want to persist this using AsyncStorage
+            // For now, we'll just keep it in memory
+            console.log('View mode changed to:', viewMode);
+        } catch (error) {
+            console.error('Error saving view mode preference:', error);
+        }
+    }, [viewMode]);
+
     useEffect(() => {
         applyFilters();
     }, [applyFilters]);
@@ -222,6 +236,9 @@ export default function ProductScreen() {
     const formatPrice = (price: number) => `₹${price.toFixed(2)}`;
     const formatDate = (date?: Date) => date ? date.toLocaleDateString('en-IN') : 'N/A';
 
+    const [selectedImage, setSelectedImage] = useState<string | null>(null);
+    const [isModalImageLoading, setIsModalImageLoading] = useState(false);
+
     const renderProduct = ({ item }: { item: Product }) => {
         const stockStatus = getStockStatus(item.stockQuantity, item.minStock);
         const expiryStatus = getExpiryStatus(item.expiryDate);
@@ -229,6 +246,24 @@ export default function ProductScreen() {
         return (
             <View style={styles.productCard}>
                 <View style={styles.productHeader}>
+                    {/* Small Product Image to the left */}
+                    <TouchableOpacity
+                        onPress={() => item.imageUrl ? setSelectedImage(item.imageUrl) : null}
+                        style={styles.thumbnailContainer}
+                    >
+                        <View style={styles.placeholderThumbnail}>
+                            <Feather name="image" size={20} color="#bbb" />
+                        </View>
+                        {item.imageUrl && (
+                            <Image
+                                source={{ uri: item.imageUrl }}
+                                style={styles.thumbnailImage}
+                                resizeMode="cover"
+                                fadeDuration={300}
+                            />
+                        )}
+                    </TouchableOpacity>
+
                     <View style={styles.productTitleContainer}>
                         <Text style={styles.productName} numberOfLines={2}>{item.productName}</Text>
                         <Text style={styles.productSku}>SKU: {item.sku}</Text>
@@ -345,7 +380,27 @@ export default function ProductScreen() {
                 )}
             </View>
 
-            <View>
+            <View style={styles.filtersSection}>
+                <View style={styles.filtersSectionHeader}>
+                    <Text style={styles.filtersSectionTitle}>Quick Filters</Text>
+                    <View style={styles.viewToggleContainer}>
+                        <TouchableOpacity
+                            style={[styles.viewToggleButton, viewMode === 'card' && styles.viewToggleActive]}
+                            onPress={() => setViewMode('card')}
+                            activeOpacity={0.7}
+                        >
+                            <Feather name="grid" size={16} color={viewMode === 'card' ? '#fff' : '#495057'} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.viewToggleButton, viewMode === 'table' && styles.viewToggleActive]}
+                            onPress={() => setViewMode('table')}
+                            activeOpacity={0.7}
+                        >
+                            <Feather name="list" size={16} color={viewMode === 'table' ? '#fff' : '#495057'} />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersContent}>
                     {filterButtons.map(filter => (
                         <TouchableOpacity
@@ -363,27 +418,123 @@ export default function ProductScreen() {
                 </ScrollView>
             </View>
 
-            <FlatList
-                data={filteredProducts}
-                keyExtractor={item => item.id}
-                renderItem={renderProduct}
-                contentContainerStyle={styles.listContainer}
-                showsVerticalScrollIndicator={false}
-                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1976d2']} tintColor="#1976d2" />}
-                ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <Feather name="package" size={64} color="#ced4da" />
-                        <Text style={styles.emptyText}>
-                            {filters.searchQuery || filters.activeFilter !== 'all'
-                                ? 'No products match your filters'
-                                : 'Your inventory is empty.'}
-                        </Text>
-                        <Text style={styles.emptySubtext}>
-                            {`Tap the '+' button to add your first product!`}
-                        </Text>
+            {/* Card View */}
+            {viewMode === 'card' && (
+                <FlatList
+                    data={filteredProducts}
+                    keyExtractor={item => item.id}
+                    renderItem={renderProduct}
+                    contentContainerStyle={styles.listContainer}
+                    showsVerticalScrollIndicator={false}
+                    refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1976d2']} tintColor="#1976d2" />}
+                    ListEmptyComponent={
+                        <View style={styles.emptyContainer}>
+                            <Feather name="package" size={64} color="#ced4da" />
+                            <Text style={styles.emptyText}>
+                                {filters.searchQuery || filters.activeFilter !== 'all'
+                                    ? 'No products match your filters'
+                                    : 'Your inventory is empty.'}
+                            </Text>
+                            <Text style={styles.emptySubtext}>
+                                {`Tap the '+' button to add your first product!`}
+                            </Text>
+                        </View>
+                    }
+                />
+            )}
+
+            {/* Table View */}
+            {viewMode === 'table' && (
+                <View style={styles.tableContainer}>
+                    {/* Table Header */}
+                    <View style={styles.tableHeader}>
+                        <View style={[styles.tableCell, styles.imageCell]}>
+                            <Text style={styles.tableHeaderText}>Image</Text>
+                        </View>
+                        <View style={[styles.tableCell, styles.nameCell]}>
+                            <Text style={styles.tableHeaderText}>Product</Text>
+                        </View>
+                        <View style={[styles.tableCell, styles.priceCell]}>
+                            <Text style={styles.tableHeaderText}>Price</Text>
+                        </View>
+                        <View style={[styles.tableCell, styles.stockCell]}>
+                            <Text style={styles.tableHeaderText}>Stock</Text>
+                        </View>
+                        <View style={[styles.tableCell, styles.actionCell]}>
+                            <Text style={styles.tableHeaderText}>Action</Text>
+                        </View>
                     </View>
-                }
-            />
+
+                    <FlatList
+                        data={filteredProducts}
+                        keyExtractor={item => item.id}
+                        contentContainerStyle={styles.tableListContainer}
+                        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1976d2']} tintColor="#1976d2" />}
+                        renderItem={({ item }) => {
+                            const stockStatus = getStockStatus(item.stockQuantity, item.minStock);
+
+                            return (
+                                <View style={styles.tableRow}>
+                                    <TouchableOpacity
+                                        style={[styles.tableCell, styles.imageCell]}
+                                        onPress={() => item.imageUrl ? setSelectedImage(item.imageUrl) : null}
+                                    >
+                                        {item.imageUrl ? (
+                                            <Image
+                                                source={{ uri: item.imageUrl }}
+                                                style={styles.tableImage}
+                                                resizeMode="cover"
+                                            />
+                                        ) : (
+                                            <View style={styles.tableImagePlaceholder}>
+                                                <Feather name="image" size={14} color="#bbb" />
+                                            </View>
+                                        )}
+                                    </TouchableOpacity>
+
+                                    <View style={[styles.tableCell, styles.nameCell]}>
+                                        <Text style={styles.tableProductName} numberOfLines={1}>{item.productName}</Text>
+                                        <Text style={styles.tableSku}>SKU: {item.sku}</Text>
+                                    </View>
+
+                                    <View style={[styles.tableCell, styles.priceCell]}>
+                                        <Text style={styles.tablePrice}>{formatPrice(item.sellingPrice)}</Text>
+                                    </View>
+
+                                    <View style={[styles.tableCell, styles.stockCell]}>
+                                        <Text style={styles.tableStock}>{item.stockQuantity}</Text>
+                                        <View style={[styles.tableStatusBadge, { backgroundColor: stockStatus.color }]}>
+                                            <Text style={styles.tableStatusText}>{stockStatus.label}</Text>
+                                        </View>
+                                    </View>
+
+                                    <View style={[styles.tableCell, styles.actionCell]}>
+                                        <TouchableOpacity
+                                            style={styles.tableActionButton}
+                                            onPress={() => router.push({ pathname: '/(protected)/edit-product', params: { id: item.id } })}
+                                        >
+                                            <Feather name="edit" size={16} color="#1976d2" />
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+                            );
+                        }}
+                        ListEmptyComponent={
+                            <View style={styles.emptyContainer}>
+                                <Feather name="package" size={64} color="#ced4da" />
+                                <Text style={styles.emptyText}>
+                                    {filters.searchQuery || filters.activeFilter !== 'all'
+                                        ? 'No products match your filters'
+                                        : 'Your inventory is empty.'}
+                                </Text>
+                                <Text style={styles.emptySubtext}>
+                                    {`Tap the '+' button to add your first product!`}
+                                </Text>
+                            </View>
+                        }
+                    />
+                </View>
+            )}
 
             <TouchableOpacity
                 style={styles.fabButton}
@@ -392,6 +543,35 @@ export default function ProductScreen() {
             >
                 <Feather name="plus" size={28} color="#fff" />
             </TouchableOpacity>
+
+            {/* Image Modal */}
+            <Modal
+                visible={!!selectedImage}
+                transparent={true}
+                animationType="fade"
+                onRequestClose={() => setSelectedImage(null)}
+            >
+                <View style={styles.modalOverlay}>
+                    <TouchableOpacity
+                        style={styles.closeModalButton}
+                        onPress={() => setSelectedImage(null)}
+                    >
+                        <Feather name="x" size={24} color="#fff" />
+                    </TouchableOpacity>
+                    <View style={styles.modalImageContainer}>
+                        {isModalImageLoading && (
+                            <ActivityIndicator size="large" color="#fff" style={styles.modalLoader} />
+                        )}
+                        <Image
+                            source={{ uri: selectedImage || '' }}
+                            style={styles.modalImage}
+                            resizeMode="contain"
+                            onLoadStart={() => setIsModalImageLoading(true)}
+                            onLoadEnd={() => setIsModalImageLoading(false)}
+                        />
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -487,42 +667,104 @@ const styles = StyleSheet.create({
         color: '#6c757d',
         marginTop: 4,
     },
-    filtersContent: {
-        paddingVertical: 12,
+    filtersSection: {
+        backgroundColor: '#ffffff',
+        paddingBottom: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e9ecef',
+        marginBottom: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 3,
+        elevation: 2,
+    },
+    filtersSectionHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
         paddingHorizontal: 24,
-        gap: 12, // Increased spacing between chips
+        paddingTop: 14,
+        paddingBottom: 12,
+    },
+    filtersSectionTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#333',
+        letterSpacing: 0.3,
+    },
+    filtersContent: {
+        paddingTop: 6,
+        paddingBottom: 8,
+        paddingHorizontal: 24,
+        gap: 10, // Slightly tighter spacing between chips
+    },
+    viewToggleContainer: {
+        flexDirection: 'row',
+        backgroundColor: '#f1f3f5',
+        borderRadius: 8,
+        padding: 2,
+        shadowColor: '#000',
+        shadowOpacity: 0.06,
+        shadowOffset: { width: 0, height: 1 },
+        shadowRadius: 3,
+        elevation: 2,
+        borderWidth: 1,
+        borderColor: '#e9ecef',
+    },
+    viewToggleButton: {
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 6,
+        minWidth: 36,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    viewToggleActive: {
+        backgroundColor: '#1976d2',
+        shadowColor: '#1565c0',
+        shadowOpacity: 0.2,
+        shadowOffset: { width: 0, height: 1 },
+        shadowRadius: 2,
+        elevation: 3,
     },
     filterChip: {
         backgroundColor: '#fff',
-        borderRadius: 20, // Pill shape
-        paddingVertical: 10, // Taller for easier tapping
-        paddingHorizontal: 20, // Wider for readability
+        borderRadius: 10, // More elegant radius
+        paddingVertical: 8,
+        paddingHorizontal: 16,
         borderWidth: 1,
-        borderColor: '#dee2e6',
+        borderColor: '#e9ecef',
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         shadowColor: '#000',
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
+        shadowOpacity: 0.04,
+        shadowRadius: 3,
+        shadowOffset: { width: 0, height: 1 },
         elevation: 2,
+        minHeight: 36,
     },
     filterChipActive: {
         backgroundColor: '#1976d2',
         borderColor: '#1976d2',
-        elevation: 4,
+        elevation: 3,
+        shadowColor: '#1976d2',
+        shadowOpacity: 0.2,
     },
     filterChipIcon: {
         fontSize: 14,
-        marginRight: 8,
+        marginRight: 6,
     },
     filterChipText: {
         color: '#495057',
-        fontWeight: '600',
-        fontSize: 14,
+        fontWeight: '500',
+        fontSize: 13,
+        letterSpacing: 0.2,
     },
     filterChipTextActive: {
         color: '#fff',
+        fontWeight: '600',
     },
     listContainer: {
         paddingHorizontal: 16,
@@ -544,13 +786,13 @@ const styles = StyleSheet.create({
     },
     productHeader: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
+        justifyContent: 'flex-start',
+        alignItems: 'center',
         marginBottom: 16,
     },
     productTitleContainer: {
         flex: 1,
-        marginRight: 16,
+        marginRight: 8,
     },
     productName: {
         fontSize: 18,
@@ -627,6 +869,189 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         marginTop: 8,
     },
+
+    // Thumbnail Image Styles
+    thumbnailContainer: {
+        width: 50,
+        height: 50,
+        borderRadius: 8,
+        overflow: 'hidden',
+        position: 'relative',
+        marginRight: 12,
+        backgroundColor: '#f5f5f5',
+    },
+    thumbnailImage: {
+        width: '100%',
+        height: '100%',
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+    },
+    placeholderThumbnail: {
+        width: '100%',
+        height: '100%',
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#f5f5f5',
+    },
+
+    // Modal Image Styles
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.85)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    modalImageContainer: {
+        width: '90%',
+        height: '70%',
+        borderRadius: 8,
+        justifyContent: 'center',
+        alignItems: 'center',
+        position: 'relative',
+    },
+    modalImage: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 8,
+    },
+    modalLoader: {
+        position: 'absolute',
+        zIndex: 1,
+    },
+    closeModalButton: {
+        position: 'absolute',
+        top: 40,
+        right: 20,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        borderRadius: 20,
+        padding: 8,
+        zIndex: 10,
+    },
+
+    // Table View Styles
+    tableContainer: {
+        flex: 1,
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        margin: 16,
+        marginTop: 8,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: '#e9ecef',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 4,
+        elevation: 2,
+        maxHeight: '80%', // Ensure table doesn't take up entire screen
+    },
+    tableHeader: {
+        flexDirection: 'row',
+        backgroundColor: '#f8f9fa',
+        borderBottomWidth: 1,
+        borderBottomColor: '#e9ecef',
+        paddingVertical: 10,
+        minHeight: 40,
+    },
+    tableHeaderText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#343a40',
+        letterSpacing: 0.2,
+        textTransform: 'uppercase',
+    },
+    tableCell: {
+        paddingHorizontal: 8,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    imageCell: {
+        width: 50,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    nameCell: {
+        flex: 1.5,
+        justifyContent: 'center',
+    },
+    priceCell: {
+        flex: 0.8,
+        alignItems: 'flex-end',
+        justifyContent: 'center',
+    },
+    stockCell: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    actionCell: {
+        width: 50,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    tableRow: {
+        flexDirection: 'row',
+        borderBottomWidth: 1,
+        borderBottomColor: '#f1f3f5',
+        paddingVertical: 10,
+        backgroundColor: '#ffffff',
+        minHeight: 50,
+        alignItems: 'center',
+    },
+    tableImage: {
+        width: 32,
+        height: 32,
+        borderRadius: 4,
+    },
+    tableImagePlaceholder: {
+        width: 32,
+        height: 32,
+        borderRadius: 4,
+        backgroundColor: '#f5f5f5',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    tableProductName: {
+        fontSize: 14,
+        fontWeight: '500',
+        color: '#212529',
+        marginBottom: 2,
+    },
+    tableSku: {
+        fontSize: 11,
+        color: '#6c757d',
+    },
+    tablePrice: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#1976d2',
+    },
+    tableStock: {
+        fontSize: 13,
+        fontWeight: '500',
+        marginBottom: 2,
+    },
+    tableStatusBadge: {
+        borderRadius: 4,
+        paddingVertical: 2,
+        paddingHorizontal: 6,
+        marginTop: 3,
+    },
+    tableStatusText: {
+        color: '#fff',
+        fontSize: 10,
+        fontWeight: '600',
+    },
+    tableActionButton: {
+        padding: 8,
+    },
+    tableListContainer: {
+        flexGrow: 1,
+    },
+
     fabButton: {
         position: 'absolute',
         bottom: 32,

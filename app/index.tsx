@@ -16,6 +16,7 @@ import { LogoBrand } from "../components/LogoBrand";
 import { useSnackbar } from "../components/SnackbarContext";
 
 import auth from "@react-native-firebase/auth";
+import firestore from "@react-native-firebase/firestore";
 
 export default function Index() { 
   const { showSnackbar } = useSnackbar();
@@ -26,8 +27,55 @@ export default function Index() {
   
   // Handle user state changes
   useEffect(() => {
-    const subscriber = auth().onAuthStateChanged(user => {
+    const subscriber = auth().onAuthStateChanged(async (user) => {
       if (user) {
+        try {
+          // Check if this user has a placeholder document that needs to be updated
+          const userDocRef = firestore().collection('users').doc(user.uid);
+          const userDoc = await userDocRef.get();
+
+          // Also check if there's a placeholder document by email
+          const emailQuery = await firestore()
+            .collection('users')
+            .where('email', '==', user.email)
+            .where('isPlaceholder', '==', true)
+            .get();
+
+          if (!emailQuery.empty && !userDoc.exists()) {
+            // Found a placeholder document with this email, update it with the real user ID
+            const placeholderDoc = emailQuery.docs[0];
+            const placeholderData = placeholderDoc.data();
+
+            // Create the real user document
+            await userDocRef.set({
+              ...placeholderData,
+              userId: user.uid,
+              email: user.email || '',
+              displayName: user.displayName || placeholderData.displayName || '',
+              photoURL: user.photoURL || '',
+              isPlaceholder: false,
+              updatedAt: new Date(),
+            });
+
+            // Delete the placeholder document
+            await placeholderDoc.ref.delete();
+          } else if (userDoc.exists()) {
+            // Update existing document with latest auth data
+            const existingData = userDoc.data();
+            if (existingData?.isPlaceholder) {
+              await userDocRef.update({
+                email: user.email || existingData.email,
+                displayName: user.displayName || existingData.displayName || '',
+                photoURL: user.photoURL || existingData.photoURL || '',
+                isPlaceholder: false,
+                updatedAt: new Date(),
+              });
+            }
+          }
+        } catch (error) {
+          console.error('Error updating user document on login:', error);
+        }
+
         // User is signed in, redirect to dashboard
         router.replace("/(protected)/home");
       }
