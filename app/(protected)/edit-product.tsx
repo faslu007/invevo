@@ -112,7 +112,7 @@ function ProductEditFormUI({
     removeImage: () => void;
     uploading: boolean;
     imageUri: string | null;
-    formatDateToIndian: (date: Date) => string;
+        formatDateToIndian: (date: Date | undefined | null) => string;
 }) {
     // The UI rendering logic will be moved here later
     return null;
@@ -155,7 +155,29 @@ export default function EditProductScreen() {
             const productDoc = await firestore().collection('products').doc(id).get();
             if (productDoc.exists()) {
                 const productData = productDoc.data() as Omit<Product, 'id'>;
-                const fullProduct: Product = { id: productDoc.id, ...productData };
+
+                // Convert Firestore Timestamps to JavaScript Dates
+                const convertTimestampToDate = (timestamp: any): Date | undefined => {
+                    if (!timestamp) return undefined;
+                    if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+                        return timestamp.toDate();
+                    }
+                    if (timestamp instanceof Date) {
+                        return timestamp;
+                    }
+                    if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+                        return new Date(timestamp);
+                    }
+                    return undefined;
+                };
+
+                const fullProduct: Product = {
+                    id: productDoc.id,
+                    ...productData,
+                    expiryDate: convertTimestampToDate(productData.expiryDate),
+                    createdAt: convertTimestampToDate(productData.createdAt) || new Date(),
+                    updatedAt: convertTimestampToDate(productData.updatedAt) || new Date(),
+                };
                 setProduct(fullProduct);
 
                 // Populate form data
@@ -344,7 +366,10 @@ export default function EditProductScreen() {
     };
 
     // Date utility functions for Indian format (DD/MM/YYYY)
-    const formatDateToIndian = (date: Date): string => {
+    const formatDateToIndian = (date: Date | undefined | null): string => {
+        if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+            return '';
+        }
         const day = date.getDate().toString().padStart(2, '0');
         const month = (date.getMonth() + 1).toString().padStart(2, '0');
         const year = date.getFullYear().toString();
