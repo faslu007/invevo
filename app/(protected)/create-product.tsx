@@ -6,19 +6,19 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Image,
-    Modal,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Image,
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
+import { useAlert } from '../../components/CustomAlert';
 import { useSnackbar } from '../../components/SnackbarContext';
 
 interface ProductFormData {
@@ -96,6 +96,7 @@ function ProductFormUI({
 
 export default function CreateProductScreen() {
   const { showSnackbar } = useSnackbar();
+  const { showAlert } = useAlert();
   const [loading, setLoading] = useState(false);
   const [showUnitPicker, setShowUnitPicker] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -179,7 +180,11 @@ export default function CreateProductScreen() {
             const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
             if (permissionResult.granted === false) {
-                Alert.alert('Permission Required', 'Permission to access camera roll is required!');
+              showAlert({
+                title: 'Permission Required',
+                message: 'Permission to access camera roll is required!',
+                type: 'warning',
+              });
                 return;
             }
 
@@ -205,7 +210,11 @@ export default function CreateProductScreen() {
             const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
 
             if (permissionResult.granted === false) {
-                Alert.alert('Permission Required', 'Permission to access camera is required!');
+              showAlert({
+                title: 'Permission Required',
+                message: 'Permission to access camera is required!',
+                type: 'warning',
+              });
                 return;
             }
 
@@ -260,10 +269,11 @@ export default function CreateProductScreen() {
     };
 
     const removeImage = () => {
-        Alert.alert(
-            'Remove Image',
-            'Are you sure you want to remove this image?',
-            [
+      showAlert({
+        title: 'Remove Image',
+        message: 'Are you sure you want to remove this image?',
+        type: 'warning',
+        buttons: [
                 { text: 'Cancel', style: 'cancel' },
                 {
                     text: 'Remove',
@@ -273,8 +283,8 @@ export default function CreateProductScreen() {
                         updateFormData('imageUrl', '');
                     },
                 },
-            ]
-        );
+          ],
+        });
     };
 
   const validateForm = (): boolean => {

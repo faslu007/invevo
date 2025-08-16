@@ -35,7 +35,7 @@ export default function ProtectedTabs() {
         }}
       />
       <Tabs.Screen 
-        name="users" 
+        name="customers" 
         options={{
           tabBarIcon: ({ color }) => <Ionicons name="people-outline" size={24} color={color} />,
         }}
@@ -60,6 +60,18 @@ export default function ProtectedTabs() {
       />
       <Tabs.Screen
         name="edit-product"
+        options={{
+          href: null, // Hide from tab bar
+        }}
+      />
+      <Tabs.Screen
+        name="create-customer"
+        options={{
+          href: null, // Hide from tab bar
+        }}
+      />
+      <Tabs.Screen
+        name="edit-customer"
         options={{
           href: null, // Hide from tab bar
         }}

@@ -6,7 +6,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     FlatList,
     Image,
     Modal,
@@ -18,6 +17,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { useAlert } from '../../components/CustomAlert';
 import { useSnackbar } from '../../components/SnackbarContext';
 
 interface Product {
@@ -120,6 +120,7 @@ function ProductEditFormUI({
 
 export default function EditProductScreen() {
     const { showSnackbar } = useSnackbar();
+    const { showAlert } = useAlert();
     const { id } = useLocalSearchParams<{ id: string }>();
     const [loading, setLoading] = useState(false);
     const [initialLoading, setInitialLoading] = useState(true);
@@ -347,10 +348,11 @@ export default function EditProductScreen() {
     const handleDelete = async () => {
         if (!product) return;
 
-        Alert.alert(
-            'Delete Product',
-            'Are you sure you want to delete this product? This action cannot be undone.',
-            [
+        showAlert({
+            title: 'Delete Product',
+            message: 'Are you sure you want to delete this product? This action cannot be undone.',
+            type: 'error',
+            buttons: [
                 { text: 'Cancel', style: 'cancel' },
                 {
                     text: 'Delete',
@@ -361,8 +363,8 @@ export default function EditProductScreen() {
                         });
                     }
                 }
-            ]
-        );
+            ],
+        });
     };
 
     // Date utility functions for Indian format (DD/MM/YYYY)
@@ -398,7 +400,11 @@ export default function EditProductScreen() {
             const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
             if (permissionResult.granted === false) {
-                Alert.alert('Permission Required', 'Permission to access camera roll is required!');
+                showAlert({
+                    title: 'Permission Required',
+                    message: 'Permission to access camera roll is required!',
+                    type: 'warning',
+                });
                 return;
             }
 
@@ -415,7 +421,11 @@ export default function EditProductScreen() {
             }
         } catch (error) {
             console.error('Error picking image:', error);
-            Alert.alert('Error', 'Failed to pick image. Please try again.');
+            showAlert({
+                title: 'Error',
+                message: 'Failed to pick image. Please try again.',
+                type: 'error',
+            });
         }
     };
 
@@ -424,7 +434,11 @@ export default function EditProductScreen() {
             const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
 
             if (permissionResult.granted === false) {
-                Alert.alert('Permission Required', 'Permission to access camera is required!');
+                showAlert({
+                    title: 'Permission Required',
+                    message: 'Permission to access camera is required!',
+                    type: 'warning',
+                });
                 return;
             }
 
@@ -441,7 +455,11 @@ export default function EditProductScreen() {
             }
         } catch (error) {
             console.error('Error taking picture:', error);
-            Alert.alert('Error', 'Failed to take picture. Please try again.');
+            showAlert({
+                title: 'Error',
+                message: 'Failed to take picture. Please try again.',
+                type: 'error',
+            });
         }
     };
 
@@ -461,7 +479,11 @@ export default function EditProductScreen() {
             setImageUri(null); // Clear local URI since we now have the uploaded URL
         } catch (error) {
             console.error('Error uploading image:', error);
-            Alert.alert('Upload Failed', 'Failed to upload image. Please try again.');
+            showAlert({
+                title: 'Upload Failed',
+                message: 'Failed to upload image. Please try again.',
+                type: 'error',
+            });
             setImageUri(null);
         } finally {
             setUploading(false);
@@ -469,10 +491,11 @@ export default function EditProductScreen() {
     };
 
     const removeImage = () => {
-        Alert.alert(
-            'Remove Image',
-            'Are you sure you want to remove this image?',
-            [
+        showAlert({
+            title: 'Remove Image',
+            message: 'Are you sure you want to remove this image?',
+            type: 'warning',
+            buttons: [
                 { text: 'Cancel', style: 'cancel' },
                 {
                     text: 'Remove',
@@ -482,8 +505,8 @@ export default function EditProductScreen() {
                         setImageUri(null);
                     },
                 },
-            ]
-        );
+            ],
+        });
     };
 
     if (initialLoading) {
