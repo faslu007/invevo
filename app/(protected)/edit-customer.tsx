@@ -1,3 +1,4 @@
+import { Feather } from '@expo/vector-icons';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -12,7 +13,6 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { Feather } from '@expo/vector-icons';
 import { useAlert } from '../../components/CustomAlert';
 import { useSnackbar } from '../../components/SnackbarContext';
 

@@ -1,11 +1,14 @@
 import { Feather } from '@expo/vector-icons';
+import Clipboard from '@react-native-clipboard/clipboard';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
+    Linking,
     RefreshControl,
     SafeAreaView,
     StyleSheet,
@@ -165,6 +168,42 @@ export default function CustomersScreen() {
     const navigateToEdit = useCallback((customerId: string) => {
         shouldPreserveScroll.current = true;
         router.push({ pathname: '/(protected)/edit-customer', params: { id: customerId } });
+    }, []);
+
+    const handleCall = useCallback((phoneNumber: string) => {
+        const phoneUrl = `tel:${phoneNumber}`;
+        Linking.canOpenURL(phoneUrl).then((supported) => {
+            if (supported) {
+                Linking.openURL(phoneUrl);
+            } else {
+                Alert.alert('Error', 'Your device does not support this feature');
+            }
+        }).catch((error) => {
+            console.error('Error opening phone dialer:', error);
+            Alert.alert('Error', 'Failed to open phone dialer');
+        });
+    }, []);
+
+    const handleCopyNumber = useCallback((phoneNumber: string) => {
+        Clipboard.setString(phoneNumber);
+        showSnackbar('Phone number copied to clipboard', 'success');
+    }, [showSnackbar]);
+
+    const handleWhatsApp = useCallback((phoneNumber: string) => {
+        // Remove any non-numeric characters from phone number
+        const cleanNumber = phoneNumber.replace(/[^\d]/g, '');
+        const whatsappUrl = `https://wa.me/${cleanNumber}`;
+
+        Linking.canOpenURL(whatsappUrl).then((supported) => {
+            if (supported) {
+                Linking.openURL(whatsappUrl);
+            } else {
+                Alert.alert('Error', 'WhatsApp is not installed on your device');
+            }
+        }).catch((error) => {
+            console.error('Error opening WhatsApp:', error);
+            Alert.alert('Error', 'Failed to open WhatsApp');
+        });
     }, []);
 
     const selectSuggestion = useCallback((customer: Customer) => {
@@ -342,13 +381,36 @@ export default function CustomersScreen() {
                                 <Text style={styles.customerName} numberOfLines={2}>{item.name}</Text>
                                 <Text style={styles.customerPhone}>{item.phone}</Text>
                             </View>
-                            <TouchableOpacity
-                                style={styles.editIcon}
-                                onPress={() => navigateToEdit(item.id)}
-                                activeOpacity={0.7}
-                            >
-                                <Feather name="edit" size={20} color="#6a7a90" />
-                            </TouchableOpacity>
+                            <View style={styles.actionButtons}>
+                                <TouchableOpacity
+                                    style={styles.actionButton}
+                                    onPress={() => handleCall(item.phone)}
+                                    activeOpacity={0.7}
+                                >
+                                    <Feather name="phone" size={18} color="#4caf50" />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.actionButton}
+                                    onPress={() => handleCopyNumber(item.phone)}
+                                    activeOpacity={0.7}
+                                >
+                                    <Feather name="copy" size={18} color="#ff9800" />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.actionButton}
+                                    onPress={() => handleWhatsApp(item.phone)}
+                                    activeOpacity={0.7}
+                                >
+                                    <Feather name="message-circle" size={18} color="#25d366" />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.editIcon}
+                                    onPress={() => navigateToEdit(item.id)}
+                                    activeOpacity={0.7}
+                                >
+                                    <Feather name="edit" size={18} color="#6a7a90" />
+                                </TouchableOpacity>
+                            </View>
                         </View>
 
                         {item.notes && (
@@ -533,6 +595,17 @@ const styles = StyleSheet.create({
         padding: 8,
         marginTop: -8,
         marginRight: -8,
+    },
+    actionButtons: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
+    actionButton: {
+        padding: 8,
+        borderRadius: 6,
+        backgroundColor: '#f8f9fa',
+        marginRight: 4,
     },
     customerDetails: {
         marginBottom: 12,
