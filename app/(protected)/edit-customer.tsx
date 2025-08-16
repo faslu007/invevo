@@ -12,6 +12,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { useAlert } from '../../components/CustomAlert';
 import { useSnackbar } from '../../components/SnackbarContext';
 
@@ -229,8 +230,19 @@ export default function EditCustomerScreen() {
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.header}>
-                <Text style={styles.title}>Edit Customer</Text>
-                <Text style={styles.subtitle}>Update customer information</Text>
+                <View style={styles.headerTop}>
+                    <TouchableOpacity 
+                        style={styles.backButton}
+                        onPress={() => router.push('/(protected)/customers')}
+                        activeOpacity={0.7}
+                    >
+                        <Feather name="arrow-left" size={24} color="#1976d2" />
+                    </TouchableOpacity>
+                    <View style={styles.headerTitleContainer}>
+                        <Text style={styles.title}>Edit Customer</Text>
+                        <Text style={styles.subtitle}>Update customer information</Text>
+                    </View>
+                </View>
             </View>
 
             <ScrollView
@@ -357,6 +369,18 @@ const styles = StyleSheet.create({
         backgroundColor: '#ffffff',
         borderBottomWidth: 1,
         borderBottomColor: '#e9ecef',
+    },
+    headerTop: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    backButton: {
+        padding: 8,
+        marginRight: 12,
+        marginLeft: -8,
+    },
+    headerTitleContainer: {
+        flex: 1,
     },
     title: {
         fontSize: 22,
